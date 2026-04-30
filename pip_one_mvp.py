@@ -272,11 +272,18 @@ def get_weights(exercise_or_partido, position):
 # ── EVENTOS ──────────────────────────────────────────────────────────────────
 
 GK_EVENTS = {
+    # Paradas
     "save":            {"label":"Parada",          "color":"#27ae60","cat":"defensive"},
     "great_save":      {"label":"Parada difícil",  "color":"#1abc9c","cat":"defensive"},
+    "penalty_saved":   {"label":"Penalti parado",  "color":"#f1c40f","cat":"defensive"},
+    "one_v_one_won":   {"label":"1v1 ganado",      "color":"#27ae60","cat":"defensive"},
+    "one_v_one_lost":  {"label":"1v1 perdido",     "color":"#e74c3c","cat":"defensive"},
+    # Salidas y despejes
     "clearance":       {"label":"Despeje",          "color":"#2980b9","cat":"defensive"},
+    "cross_caught":    {"label":"Centro atrapado",  "color":"#3498db","cat":"defensive"},
     "good_exit":       {"label":"Salida ✓",        "color":"#27ae60","cat":"defensive"},
     "bad_exit":        {"label":"Salida ✗",        "color":"#e74c3c","cat":"defensive"},
+    # Pase
     "short_pass_ok":   {"label":"Pase corto ✓",    "color":"#3498db","cat":"technical"},
     "short_pass_fail": {"label":"Pase corto ✗",    "color":"#c0392b","cat":"technical"},
     "long_pass_ok":    {"label":"Pase largo ✓",    "color":"#2980b9","cat":"technical"},
@@ -285,41 +292,69 @@ GK_EVENTS = {
 }
 
 GK_LAYOUT = [
-    ("save","great_save"),
-    ("clearance","good_exit"),
-    ("bad_exit","short_pass_ok"),
+    ("save",          "great_save"),
+    ("penalty_saved", "one_v_one_won"),
+    ("one_v_one_lost","clearance"),
+    ("cross_caught",  "good_exit"),
+    ("bad_exit",      "short_pass_ok"),
     ("short_pass_fail","long_pass_ok"),
     ("long_pass_fail","gk_error"),
 ]
 
 FIELD_EVENTS = {
-    "pass_success":     {"label":"Pase ✓",       "color":"#27ae60","cat":"technical"},
-    "pass_fail":        {"label":"Pase ✗",       "color":"#e74c3c","cat":"technical"},
-    "control_success":  {"label":"Control ✓",    "color":"#3498db","cat":"technical"},
-    "control_fail":     {"label":"Control ✗",    "color":"#c0392b","cat":"technical"},
-    "decision_correct": {"label":"Decisión ✓",   "color":"#1abc9c","cat":"decision"},
-    "decision_wrong":   {"label":"Decisión ✗",   "color":"#e74c3c","cat":"decision"},
-    "shot":             {"label":"Tiro",          "color":"#f39c12","cat":"offensive"},
-    "shot_on_target":   {"label":"Tiro puerta",  "color":"#e67e22","cat":"offensive"},
-    "goal":             {"label":"Gol",           "color":"#f1c40f","cat":"offensive"},
-    "dribble_success":  {"label":"Regate ✓",     "color":"#27ae60","cat":"offensive"},
-    "dribble_fail":     {"label":"Regate ✗",     "color":"#e74c3c","cat":"offensive"},
-    "recovery":         {"label":"Recuperación", "color":"#8e44ad","cat":"defensive"},
-    "interception":     {"label":"Intercepción", "color":"#9b59b6","cat":"defensive"},
-    "duel_won":         {"label":"Duelo ✓",      "color":"#27ae60","cat":"defensive"},
-    "duel_lost":        {"label":"Duelo ✗",      "color":"#e74c3c","cat":"defensive"},
-    "error":            {"label":"Error",         "color":"#c0392b","cat":"general"},
+    # Técnica
+    "pass_success":       {"label":"Pase ✓",           "color":"#27ae60","cat":"technical"},
+    "pass_fail":          {"label":"Pase ✗",           "color":"#e74c3c","cat":"technical"},
+    "control_success":    {"label":"Control ✓",        "color":"#3498db","cat":"technical"},
+    "control_fail":       {"label":"Control ✗",        "color":"#c0392b","cat":"technical"},
+    "header_success":     {"label":"Cabezazo ✓",       "color":"#2ecc71","cat":"technical"},
+    "header_fail":        {"label":"Cabezazo ✗",       "color":"#e74c3c","cat":"technical"},
+    # Decisión
+    "decision_correct":   {"label":"Decisión ✓",       "color":"#1abc9c","cat":"decision"},
+    "decision_wrong":     {"label":"Decisión ✗",       "color":"#e74c3c","cat":"decision"},
+    # Ataque
+    "shot":               {"label":"Tiro ✗",           "color":"#e74c3c","cat":"offensive"},
+    "shot_on_target":     {"label":"Tiro a gol ✓",     "color":"#f39c12","cat":"offensive"},
+    "goal":               {"label":"Gol",              "color":"#f1c40f","cat":"offensive"},
+    "assist":             {"label":"Asistencia",        "color":"#f39c12","cat":"offensive"},
+    "dribble_success":    {"label":"Regate ✓",         "color":"#27ae60","cat":"offensive"},
+    "dribble_fail":       {"label":"Regate ✗",         "color":"#e74c3c","cat":"offensive"},
+    "corner_won":         {"label":"Córner ganado",    "color":"#e67e22","cat":"offensive"},
+    # Defensa
+    "recovery":           {"label":"Recuperación",     "color":"#8e44ad","cat":"defensive"},
+    "interception":       {"label":"Intercepción",     "color":"#9b59b6","cat":"defensive"},
+    "duel_won":           {"label":"Duelo ✓",          "color":"#27ae60","cat":"defensive"},
+    "duel_lost":          {"label":"Duelo ✗",          "color":"#e74c3c","cat":"defensive"},
+    "pressing_success":   {"label":"Pressing ✓",       "color":"#27ae60","cat":"defensive"},
+    "pressing_fail":      {"label":"Pressing ✗",       "color":"#e74c3c","cat":"defensive"},
+    # General / negativo
+    "foul_received":      {"label":"Falta recibida",   "color":"#3498db","cat":"general"},
+    "foul_committed":     {"label":"Falta cometida",   "color":"#e67e22","cat":"general"},
+    "offside":            {"label":"Fuera de juego",   "color":"#e74c3c","cat":"general"},
+    "ball_loss":          {"label":"Pérdida de balón", "color":"#c0392b","cat":"general"},
+    "error":              {"label":"Error",             "color":"#c0392b","cat":"general"},
 }
 
 FIELD_LAYOUT = [
-    ("pass_success","pass_fail"),
-    ("control_success","control_fail"),
+    # — TÉCNICA —
+    ("pass_success",    "pass_fail"),
+    ("control_success", "control_fail"),
+    ("header_success",  "header_fail"),
+    # — DECISIÓN —
     ("decision_correct","decision_wrong"),
-    ("shot","shot_on_target"),
-    ("goal","dribble_success"),
-    ("dribble_fail","recovery"),
-    ("interception","duel_won"),
-    ("duel_lost","error"),
+    # — ATAQUE —
+    ("shot",            "shot_on_target"),
+    ("goal",            "assist"),
+    ("dribble_success", "dribble_fail"),
+    ("corner_won",      None),
+    # — DEFENSA —
+    ("recovery",        "interception"),
+    ("duel_won",        "duel_lost"),
+    ("pressing_success","pressing_fail"),
+    # — GENERAL —
+    ("foul_received",   "foul_committed"),
+    ("offside",         "ball_loss"),
+    ("error",           None),
 ]
 
 ALL_EVENTS = {**GK_EVENTS, **FIELD_EVENTS}
@@ -379,36 +414,61 @@ def compute_metrics(events_list, position, exercise_key):
             "score_offensive":  0.0,
             "score_defensive":  round(defe*10,1),
             "rating": round(g*10,1),
-            # unused field-only cols (stored as 0 for DB)
             "pass_accuracy":0,"control_accuracy":0,"decision_score":0,
             "dribble_accuracy":0,"duel_accuracy":0,"total_shots":0,
             "shots_on_target":0,"goals":0,"offensive_actions":0,
-            "defensive_actions": saves+clr+good_ex,
+            "defensive_actions": all_saves+clr+cross_ok+good_ex,
             "recoveries":0,"interceptions":0,
+            "assists":0,"corners_won":0,"header_accuracy":0,
+            "pressing_accuracy":0,"fouls_received":0,"fouls_committed":0,
+            "offsides":0,"ball_losses":0,
         }
     else:
-        ps,pf   = cnt("pass_success"),cnt("pass_fail")
-        cs,cf   = cnt("control_success"),cnt("control_fail")
-        dc,dw   = cnt("decision_correct"),cnt("decision_wrong")
-        sh,sot  = cnt("shot"),cnt("shot_on_target")
-        gl      = cnt("goal")
-        drs,drf = cnt("dribble_success"),cnt("dribble_fail")
-        rec,icp = cnt("recovery"),cnt("interception")
-        duw,dul = cnt("duel_won"),cnt("duel_lost")
-        err     = cnt("error")
+        ps,pf    = cnt("pass_success"),cnt("pass_fail")
+        cs,cf    = cnt("control_success"),cnt("control_fail")
+        hs,hf    = cnt("header_success"),cnt("header_fail")
+        dc,dw    = cnt("decision_correct"),cnt("decision_wrong")
+        sh,sot   = cnt("shot"),cnt("shot_on_target")
+        gl       = cnt("goal")
+        ast      = cnt("assist")
+        drs,drf  = cnt("dribble_success"),cnt("dribble_fail")
+        crn      = cnt("corner_won")
+        rec,icp  = cnt("recovery"),cnt("interception")
+        duw,dul  = cnt("duel_won"),cnt("duel_lost")
+        prs,prf  = cnt("pressing_success"),cnt("pressing_fail")
+        f_recv   = cnt("foul_received")
+        f_comm   = cnt("foul_committed")
+        offsides = cnt("offside")
+        bl       = cnt("ball_loss")
+        err      = cnt("error")
 
         pa   = ps/(ps+pf)    if (ps+pf)>0   else 0.0
         ca   = cs/(cs+cf)    if (cs+cf)>0   else 0.0
+        ha   = hs/(hs+hf)    if (hs+hf)>0   else 0.5
         da   = dc/(dc+dw)    if (dc+dw)>0   else 0.0
         dra  = drs/(drs+drf) if (drs+drf)>0 else 0.0
         dua  = duw/(duw+dul) if (duw+dul)>0 else 0.0
-        part = min(total/20.0, 1.0)
-        ep   = min(err*0.05, 0.25)
+        pra  = prs/(prs+prf) if (prs+prf)>0 else 0.5
+        part = min(total/25.0, 1.0)
 
-        tech = max(0, (pa*0.5 + ca*0.5) - ep)
-        dec  = max(0, da - ep*0.5)
-        off  = min((sh+sot+gl+drs)/5.0,1.0)*0.5 + (sot/max(sh,1))*0.3 + min(gl,1)*0.2
-        defe = min((rec+icp+duw)/5.0,1.0)*0.6 + dua*0.4
+        neg_pen = min((err*0.06 + f_comm*0.03 + offsides*0.03 + bl*0.04), 0.30)
+
+        tech = max(0, (pa*0.45 + ca*0.35 + ha*0.20) - neg_pen*0.6)
+        dec  = max(0, da - neg_pen*0.4)
+
+        drb_score  = dra if (drs+drf)>0 else 0.5
+        off_total  = sh + sot + gl + drs + ast + crn
+        off = (min(off_total/6.0,1.0)*0.35
+               + (sot/max(sh+0.01,1))*0.25
+               + min(gl,1)*0.15
+               + min(ast/2,1)*0.10
+               + drb_score*0.10
+               + min(f_recv*0.02,0.05))
+
+        def_total  = rec + icp + duw + prs
+        defe = (min(def_total/6.0,1.0)*0.45
+                + dua*0.30
+                + pra*0.25)
 
         g = tech*w["technical"]+dec*w["decision"]+off*w["offensive"]+defe*w["defensive"]
         g = min(g + part*0.4, 1.0)
@@ -420,13 +480,20 @@ def compute_metrics(events_list, position, exercise_key):
             "w_offensive": w["offensive"], "w_defensive": w["defensive"],
             "save_rate":0,"exit_rate":0,"short_pass_acc":0,"long_pass_acc":0,
             "total_saves":0,"great_saves":0,
-            "pass_accuracy": round(pa*100,1), "control_accuracy": round(ca*100,1),
-            "decision_score": round(da*100,1), "dribble_accuracy": round(dra*100,1),
-            "duel_accuracy":  round(dua*100,1),
+            "pass_accuracy":    round(pa*100,1),
+            "control_accuracy": round(ca*100,1),
+            "decision_score":   round(da*100,1),
+            "dribble_accuracy": round(dra*100,1),
+            "duel_accuracy":    round(dua*100,1),
             "total_shots": sh+sot, "shots_on_target": sot, "goals": gl,
-            "offensive_actions": sh+sot+gl+drs,
-            "defensive_actions": rec+icp+duw,
+            "offensive_actions": off_total,
+            "defensive_actions": def_total,
             "recoveries": rec, "interceptions": icp, "errors": err,
+            "assists": ast, "corners_won": crn,
+            "header_accuracy":   round(ha*100,1),
+            "pressing_accuracy": round(pra*100,1),
+            "fouls_received": f_recv, "fouls_committed": f_comm,
+            "offsides": offsides, "ball_losses": bl,
             "participation_rate": round(part*100,1),
             "score_technical":  round(tech*10,1),
             "score_decision":   round(dec*10,1),
@@ -637,18 +704,24 @@ def make_report_html(player_name, sess, m, analysis, observation):
         ]
     else:
         metric_rows = [
-            ("Pase %",        f'{m["pass_accuracy"]:.0f}%',    m["pass_accuracy"]>=80),
-            ("Control %",     f'{m["control_accuracy"]:.0f}%', m["control_accuracy"]>=70),
-            ("Decisión %",    f'{m["decision_score"]:.0f}%',   m["decision_score"]>=80),
-            ("Regate %",      f'{m["dribble_accuracy"]:.0f}%', m["dribble_accuracy"]>=60),
-            ("Duelo %",       f'{m["duel_accuracy"]:.0f}%',    m["duel_accuracy"]>=60),
-            ("Tiros puerta",  str(m["shots_on_target"]),         m["shots_on_target"]>0),
-            ("Goles",         str(m["goals"]),                   m["goals"]>0),
-            ("Recuperaciones",str(m["recoveries"]),              m["recoveries"]>2),
-            ("Intercepciones",str(m["interceptions"]),           m["interceptions"]>1),
-            ("Errores",       str(m["errors"]),                  m["errors"]==0),
-            ("Acc. Ofensivas",str(m["offensive_actions"]),       True),
-            ("Acc. Defensivas",str(m["defensive_actions"]),      True),
+            ("Pase %",       f'{m["pass_accuracy"]:.0f}%',              m["pass_accuracy"]>=80),
+            ("Control %",    f'{m["control_accuracy"]:.0f}%',           m["control_accuracy"]>=70),
+            ("Cabezazo %",   f'{m.get("header_accuracy",0):.0f}%',      m.get("header_accuracy",0)>=60),
+            ("Decisión %",   f'{m["decision_score"]:.0f}%',             m["decision_score"]>=80),
+            ("Regate %",     f'{m["dribble_accuracy"]:.0f}%',           m["dribble_accuracy"]>=60),
+            ("Duelo %",      f'{m["duel_accuracy"]:.0f}%',              m["duel_accuracy"]>=60),
+            ("Pressing %",   f'{m.get("pressing_accuracy",0):.0f}%',    m.get("pressing_accuracy",0)>=60),
+            ("Tiros puerta", str(m["shots_on_target"]),                   m["shots_on_target"]>0),
+            ("Goles",        str(m["goals"]),                             m["goals"]>0),
+            ("Asistencias",  str(m.get("assists",0)),                     m.get("assists",0)>0),
+            ("Córners",      str(m.get("corners_won",0)),                 m.get("corners_won",0)>0),
+            ("Recuperaciones",str(m["recoveries"]),                       m["recoveries"]>2),
+            ("Intercepciones",str(m["interceptions"]),                    m["interceptions"]>1),
+            ("F. recibidas", str(m.get("fouls_received",0)),              m.get("fouls_received",0)>2),
+            ("F. cometidas", str(m.get("fouls_committed",0)),             m.get("fouls_committed",0)==0),
+            ("Fuera de juego",str(m.get("offsides",0)),                   m.get("offsides",0)==0),
+            ("Pérdidas",     str(m.get("ball_losses",0)),                 m.get("ball_losses",0)==0),
+            ("Errores",      str(m["errors"]),                            m["errors"]==0),
         ]
     metrics_html = "".join(
         f'<div class="metric-item"><div class="metric-label">{lbl}</div>' +
@@ -1310,12 +1383,28 @@ elif st.session_state.page == "report":
                 with col_: st.metric(lbl,val)
         else:
             mg = st.columns(4)
-            for col_,(lbl,val) in zip(mg,[("Pase %",f'{m["pass_accuracy"]:.0f}%'),("Control %",f'{m["control_accuracy"]:.0f}%'),
-                                         ("Decisión %",f'{m["decision_score"]:.0f}%'),("Regate %",f'{m["dribble_accuracy"]:.0f}%')]):
+            for col_,(lbl,val) in zip(mg,[("Pase %",f'{m["pass_accuracy"]:.0f}%'),
+                                         ("Control %",f'{m["control_accuracy"]:.0f}%'),
+                                         ("Cabezazo %",f'{m.get("header_accuracy",0):.0f}%'),
+                                         ("Decisión %",f'{m["decision_score"]:.0f}%')]):
                 with col_: st.metric(lbl,val)
             mg2 = st.columns(4)
-            for col_,(lbl,val) in zip(mg2,[("Duelo %",f'{m["duel_accuracy"]:.0f}%'),("Goles",m["goals"]),
-                                          ("Recuper.",m["recoveries"]),("Errores",m["errors"])]):
+            for col_,(lbl,val) in zip(mg2,[("Regate %",f'{m["dribble_accuracy"]:.0f}%'),
+                                          ("Duelo %",f'{m["duel_accuracy"]:.0f}%'),
+                                          ("Pressing %",f'{m.get("pressing_accuracy",0):.0f}%'),
+                                          ("Goles",m["goals"])]):
+                with col_: st.metric(lbl,val)
+            mg3 = st.columns(4)
+            for col_,(lbl,val) in zip(mg3,[("Asistencias",m.get("assists",0)),
+                                          ("Recuper.",m["recoveries"]),
+                                          ("Córners",m.get("corners_won",0)),
+                                          ("Errores",m["errors"])]):
+                with col_: st.metric(lbl,val)
+            mg4 = st.columns(4)
+            for col_,(lbl,val) in zip(mg4,[("F. recibidas",m.get("fouls_received",0)),
+                                          ("F. cometidas",m.get("fouls_committed",0)),
+                                          ("Fueras juego",m.get("offsides",0)),
+                                          ("Pérdidas",m.get("ball_losses",0))]):
                 with col_: st.metric(lbl,val)
 
         # Analysis
