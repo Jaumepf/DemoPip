@@ -9,13 +9,6 @@ from datetime import datetime
 import numpy as np
 import matplotlib; matplotlib.use("Agg")
 import matplotlib.pyplot as plt
-from reportlab.lib.pagesizes import A4
-from reportlab.lib import colors
-from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
-from reportlab.lib.units import cm
-from reportlab.lib.enums import TA_CENTER, TA_LEFT
-from reportlab.platypus import (SimpleDocTemplate, Paragraph, Spacer, Table,
-                                  TableStyle, HRFlowable, Image as RLImage)
 
 DB_PATH = "pip_one.db"
 
@@ -558,154 +551,290 @@ def bar_img(m, size=(4.0,1.8)):
 # PDF
 # ══════════════════════════════════════════════════════════════════════════════
 
-def make_pdf(player_name, sess, m, analysis, observation):
-    buf = io.BytesIO()
-    doc = SimpleDocTemplate(buf, pagesize=A4,
-                            leftMargin=2*cm,rightMargin=2*cm,topMargin=2*cm,bottomMargin=2*cm)
-    styles = getSampleStyleSheet()
-    RED   = colors.HexColor("#e63946")
-    DARK  = colors.HexColor("#080808")
-    MID   = colors.HexColor("#161616")
-    LIGHT = colors.HexColor("#222222")
-    GRAY  = colors.HexColor("#888888")
-    pc    = colors.HexColor(pos_color(m["position"]))
+def _radar_svg(m):
+    """Genera el SVG del radar para el informe HTML."""
+    cats   = ["TÉCNICA","DEC.","ATAQUE","PART.","DEF."]
+    scores = [m["score_technical"], m["score_decision"], m["score_offensive"],
+              m["participation_rate"]/10, m["score_defensive"]]
+    import math
+    cx, cy, R = 100, 100, 80
+    n = len(cats)
+    angles = [math.radians(90 + i*360/n) for i in range(n)]
+    # axis endpoints
+    axes = [(cx + R*math.cos(a), cy - R*math.sin(a)) for a in angles]
+    # data polygon
+    pts = [(cx + (s/10)*R*math.cos(a), cy - (s/10)*R*math.sin(a))
+           for s,a in zip(scores, angles)]
+    poly_pts = " ".join(f"{x:.1f},{y:.1f}" for x,y in pts)
+    pc = {"GK":"#f39c12","DEF":"#27ae60","MED":"#8e44ad","DEL":"#e63946"}.get(m["position"],"#e8ff47")
 
-    s_title = ParagraphStyle("T",parent=styles["Title"],fontSize=22,textColor=RED,spaceAfter=2,fontName="Helvetica-Bold")
-    s_sub   = ParagraphStyle("S",parent=styles["Normal"],fontSize=9,textColor=GRAY,spaceAfter=6,alignment=TA_CENTER)
-    s_h2    = ParagraphStyle("H2",parent=styles["Normal"],fontSize=11,textColor=RED,spaceBefore=12,spaceAfter=4,fontName="Helvetica-Bold")
-    s_body  = ParagraphStyle("B",parent=styles["Normal"],fontSize=9,textColor=colors.HexColor("#cccccc"),leading=14,spaceAfter=8)
-    s_obs   = ParagraphStyle("O",parent=styles["Normal"],fontSize=9,textColor=colors.HexColor("#aaaaaa"),leading=14,leftIndent=10)
-    s_small = ParagraphStyle("SM",parent=styles["Normal"],fontSize=7,textColor=GRAY,alignment=TA_CENTER,spaceBefore=4)
+    lines = "".join(f'<line x1="{cx}" y1="{cy}" x2="{ax:.1f}" y2="{ay:.1f}" stroke="#252830" stroke-width="1"/>'
+                    for ax,ay in axes)
+    circles = "".join(f'<circle cx="{cx}" cy="{cy}" r="{r}" fill="none" stroke="#252830" stroke-width="1"/>'
+                       for r in [20,40,60,80])
+    dots = "".join(f'<circle cx="{x:.1f}" cy="{y:.1f}" r="4" fill="{pc}"/>' for x,y in pts)
+    label_r = R + 14
+    labels_svg = ""
+    for i,(cat,a) in enumerate(zip(cats,angles)):
+        lx = cx + label_r*math.cos(a)
+        ly = cy - label_r*math.sin(a)
+        labels_svg += f'<text x="{lx:.1f}" y="{ly:.1f}" text-anchor="middle" dominant-baseline="central" fill="#9ca3af" font-size="9" font-weight="600">{cat}</text>'
 
-    def enc(t):
-        t = re.sub(r'\*\*(.*?)\*\*',r'\1',str(t))
-        return t.replace('&','&amp;').replace('<','&lt;').replace('>','&gt;')
+    return f"""<svg width="200" height="200" viewBox="0 0 200 200" style="font-family:DM Sans,sans-serif">
+  {circles}{lines}
+  <polygon points="{poly_pts}" fill="{pc}26" stroke="{pc}" stroke-width="2" stroke-linejoin="round"/>
+  {dots}{labels_svg}
+</svg>"""
 
-    story = []
 
-    # Header
-    ht = Table([[
-        Paragraph("PIP ONE",ParagraphStyle("HL",parent=styles["Normal"],fontSize=18,textColor=RED,fontName="Helvetica-Bold",alignment=TA_LEFT)),
-        Paragraph("INFORME DE JUGADOR",ParagraphStyle("HR",parent=styles["Normal"],fontSize=8,textColor=GRAY,fontName="Helvetica-Bold",alignment=4,letterSpacing=3)),
-    ]],colWidths=[9*cm,8*cm])
-    ht.setStyle(TableStyle([("BACKGROUND",(0,0),(-1,-1),DARK),("LINEBELOW",(0,0),(-1,-1),2,RED),
-                             ("TOPPADDING",(0,0),(-1,-1),8),("BOTTOMPADDING",(0,0),(-1,-1),10)]))
-    story.append(ht); story.append(Spacer(1,10))
+def make_report_html(player_name, sess, m, analysis, observation):
+    """Genera el informe como HTML fiel al diseño PIP ONE."""
+    import re as _re
+    ex_label   = sess.get("exercise_type") or "Partido"
+    pos_label  = {"GK":"Portero","DEF":"Defensa","MED":"Centrocampista","DEL":"Delantero"}.get(m["position"], m["position"])
+    date_str   = fmt_dt(sess.get("created_at",""))[:10]
+    part_str   = f'{m["total_events"]} ({m["participation_rate"]:.0f}% part.)'
+    pc         = {"GK":"#f39c12","DEF":"#27ae60","MED":"#8e44ad","DEL":"#e63946"}.get(m["position"],"#e8ff47")
 
-    story.append(Paragraph(enc(player_name), s_title))
-    ex_label = sess.get("exercise_type") or "Partido"
-    pos_label = POS_NAMES.get(m["position"], m["position"])
-    story.append(Paragraph(enc(f"{pos_label} · {ex_label} · {sess['name']} · {sess['created_at'][:10]}"), s_sub))
-    story.append(HRFlowable(width="100%",thickness=1,color=LIGHT,spaceAfter=10))
+    r = m["rating"]
+    nivel = ("Rendimiento Excepcional" if r>=8.5 else
+             "Rendimiento Muy Bueno"   if r>=7.0 else
+             "Rendimiento Correcto"    if r>=5.0 else
+             "Rendimiento Mejorable")
 
-    # Rating block
-    rating_p = Paragraph(
-        f'<font color="#e63946" size="36"><b>{m["rating"]}</b></font><br/>'
-        f'<font color="#888" size="8">RATING /10</font>',
-        ParagraphStyle("RT",parent=styles["Normal"],alignment=TA_CENTER))
+    # Scores cards
+    cat_info = [
+        ("Técnica",  "score_technical",  m["w_technical"],  "#6366f1"),
+        ("Decisión", "score_decision",   m["w_decision"],   "#e8ff47"),
+        ("Ataque",   "score_offensive",  m["w_offensive"],  "#ff4757"),
+        ("Defensa",  "score_defensive",  m["w_defensive"],  "#4ade80"),
+    ]
+    score_cards = ""
+    for cat, key, weight, color in cat_info:
+        val   = m[key]
+        pct   = val*10
+        best  = val == max(m["score_technical"],m["score_decision"],m["score_offensive"],m["score_defensive"])
+        worst = val == min(m["score_technical"],m["score_decision"],m["score_offensive"],m["score_defensive"])
+        cls   = "highlight" if best else ("low" if worst else "")
+        score_cards += f"""<div class="score-card {cls}">
+          <div class="score-cat">{cat}</div>
+          <div class="score-val">{val:.1f}</div>
+          <div class="score-weight">Peso {weight*100:.0f}%</div>
+          <div class="score-bar"><div class="score-bar-fill" style="width:{pct:.0f}%;background:{color};"></div></div>
+        </div>"""
 
-    pos_p = Paragraph(
-        f'<font size="9" color="#888">POSICIÓN</font><br/>'
-        f'<font size="13" color="{pos_color(m["position"])}"><b>{pos_label}</b></font><br/>'
-        f'<font size="8" color="#555">{m["total_events"]} acciones · {m["participation_rate"]:.0f}% part.</font>',
-        ParagraphStyle("PP",parent=styles["Normal"],alignment=TA_CENTER))
-
-    w_p = Paragraph(
-        f'<font size="8" color="#555">PESOS APLICADOS</font><br/>'
-        f'<font size="8" color="#3498db">Téc {m["w_technical"]*100:.0f}%</font>  '
-        f'<font size="8" color="#9b59b6">Dec {m["w_decision"]*100:.0f}%</font><br/>'
-        f'<font size="8" color="#e63946">Ata {m["w_offensive"]*100:.0f}%</font>  '
-        f'<font size="8" color="#27ae60">Def {m["w_defensive"]*100:.0f}%</font>',
-        ParagraphStyle("WP",parent=styles["Normal"],alignment=TA_CENTER))
-
-    top = Table([[rating_p, pos_p, w_p]],colWidths=[4.5*cm,5.5*cm,7*cm])
-    top.setStyle(TableStyle([("BACKGROUND",(0,0),(-1,-1),MID),("VALIGN",(0,0),(-1,-1),"MIDDLE"),
-                              ("ALIGN",(0,0),(-1,-1),"CENTER"),("BOX",(0,0),(-1,-1),0.5,LIGHT),
-                              ("TOPPADDING",(0,0),(-1,-1),14),("BOTTOMPADDING",(0,0),(-1,-1),14)]))
-    story.append(top); story.append(Spacer(1,10))
-
-    # Scores
-    scores_data = [["CATEGORÍA","SCORE","PESO"]]
-    for cat,score,weight,color_hex in [
-        ("Técnica",  m["score_technical"], m["w_technical"], "#3498db"),
-        ("Decisión", m["score_decision"],  m["w_decision"],  "#9b59b6"),
-        ("Ataque",   m["score_offensive"], m["w_offensive"], "#e63946"),
-        ("Defensa",  m["score_defensive"], m["w_defensive"], "#27ae60"),
-    ]:
-        scores_data.append([
-            Paragraph(f'<font color="#888" size="8">{cat}</font>',styles["Normal"]),
-            Paragraph(f'<font color="{color_hex}" size="14"><b>{score:.1f}</b></font>',styles["Normal"]),
-            Paragraph(f'<font color="#555" size="8">{weight*100:.0f}%</font>',styles["Normal"]),
-        ])
-    st_ = Table(scores_data, colWidths=[4*cm,3*cm,3*cm])
-    st_.setStyle(TableStyle([("BACKGROUND",(0,0),(-1,-1),MID),("GRID",(0,0),(-1,-1),0.3,LIGHT),
-                              ("TOPPADDING",(0,0),(-1,-1),6),("BOTTOMPADDING",(0,0),(-1,-1),6),
-                              ("LEFTPADDING",(0,0),(-1,-1),8),
-                              ("BACKGROUND",(0,0),(-1,0),colors.HexColor("#0a0a0a")),
-                              ("TEXTCOLOR",(0,0),(-1,0),GRAY),("FONTNAME",(0,0),(-1,0),"Helvetica-Bold"),
-                              ("FONTSIZE",(0,0),(-1,0),7)]))
-
-    # Bar chart
-    b_buf = bar_img(m)
-    b_img = RLImage(b_buf,width=9*cm,height=4*cm)
-
-    mid_block = Table([[st_, b_img]],colWidths=[10*cm,7*cm])
-    mid_block.setStyle(TableStyle([("VALIGN",(0,0),(-1,-1),"MIDDLE"),
-                                    ("LEFTPADDING",(0,0),(-1,-1),0),("RIGHTPADDING",(0,0),(-1,-1),0)]))
-    story.append(mid_block); story.append(Spacer(1,8))
-
-    # Key metrics
-    story.append(Paragraph("MÉTRICAS CLAVE", s_h2))
+    # Metrics grid
     if m["position"] == "GK":
-        mkeys = [("Paradas",m["total_saves"]),("Paradas difíciles",m.get("great_saves",0)),
-                 ("Efectividad %",f'{m["save_rate"]:.0f}%'),("Salidas %",f'{m["exit_rate"]:.0f}%'),
-                 ("Pase corto %",f'{m["short_pass_acc"]:.0f}%'),("Pase largo %",f'{m["long_pass_acc"]:.0f}%'),
-                 ("Errores",m["errors"]),("Participación %",f'{m["participation_rate"]:.0f}%')]
+        metric_rows = [
+            ("Paradas",      str(m["total_saves"]),      m["total_saves"]>3),
+            ("P. difíciles", str(m["great_saves"]),      m["great_saves"]>1),
+            ("Efectividad",  f'{m["save_rate"]:.0f}%', m["save_rate"]>70),
+            ("Salidas %",    f'{m["exit_rate"]:.0f}%', m["exit_rate"]>70),
+            ("Pase corto",   f'{m["short_pass_acc"]:.0f}%', m["short_pass_acc"]>70),
+            ("Pase largo",   f'{m["long_pass_acc"]:.0f}%', m["long_pass_acc"]>70),
+            ("Errores",      str(m["errors"]),           m["errors"]==0),
+            ("Participación",f'{m["participation_rate"]:.0f}%', True),
+        ]
     else:
-        mkeys = [("Pase %",f'{m["pass_accuracy"]:.0f}%'),("Control %",f'{m["control_accuracy"]:.0f}%'),
-                 ("Decisión %",f'{m["decision_score"]:.0f}%'),("Regate %",f'{m["dribble_accuracy"]:.0f}%'),
-                 ("Duelo %",f'{m["duel_accuracy"]:.0f}%'),("Tiros puerta",m["shots_on_target"]),
-                 ("Goles",m["goals"]),("Recuperaciones",m["recoveries"]),
-                 ("Intercepciones",m["interceptions"]),("Errores",m["errors"]),
-                 ("Acc. ofensivas",m["offensive_actions"]),("Acc. defensivas",m["defensive_actions"])]
-    rows = []
-    for i in range(0,len(mkeys),3):
-        chunk = mkeys[i:i+3]; row = []
-        for lbl,val in chunk:
-            row += [Paragraph(f'<font color="#555" size="7">{enc(lbl)}</font>',styles["Normal"]),
-                    Paragraph(f'<font color="#e63946" size="11"><b>{enc(str(val))}</b></font>',styles["Normal"])]
-        while len(row)<6: row += [Paragraph("",styles["Normal"]),Paragraph("",styles["Normal"])]
-        rows.append(row)
-    mt = Table(rows,colWidths=[4*cm,1.5*cm,4*cm,1.5*cm,4*cm,1.5*cm])
-    mt.setStyle(TableStyle([("BACKGROUND",(0,0),(-1,-1),MID),("GRID",(0,0),(-1,-1),0.3,LIGHT),
-                             ("TOPPADDING",(0,0),(-1,-1),5),("BOTTOMPADDING",(0,0),(-1,-1),5),
-                             ("LEFTPADDING",(0,0),(-1,-1),8),
-                             ("ROWBACKGROUNDS",(0,0),(-1,-1),[MID,colors.HexColor("#131313")])]))
-    story.append(mt); story.append(Spacer(1,8))
+        metric_rows = [
+            ("Pase %",        f'{m["pass_accuracy"]:.0f}%',    m["pass_accuracy"]>=80),
+            ("Control %",     f'{m["control_accuracy"]:.0f}%', m["control_accuracy"]>=70),
+            ("Decisión %",    f'{m["decision_score"]:.0f}%',   m["decision_score"]>=80),
+            ("Regate %",      f'{m["dribble_accuracy"]:.0f}%', m["dribble_accuracy"]>=60),
+            ("Duelo %",       f'{m["duel_accuracy"]:.0f}%',    m["duel_accuracy"]>=60),
+            ("Tiros puerta",  str(m["shots_on_target"]),         m["shots_on_target"]>0),
+            ("Goles",         str(m["goals"]),                   m["goals"]>0),
+            ("Recuperaciones",str(m["recoveries"]),              m["recoveries"]>2),
+            ("Intercepciones",str(m["interceptions"]),           m["interceptions"]>1),
+            ("Errores",       str(m["errors"]),                  m["errors"]==0),
+            ("Acc. Ofensivas",str(m["offensive_actions"]),       True),
+            ("Acc. Defensivas",str(m["defensive_actions"]),      True),
+        ]
+    metrics_html = "".join(
+        f'<div class="metric-item"><div class="metric-label">{lbl}</div>' +
+        f'<div class="metric-val {"good" if good and v not in ("0","0%") else ("bad" if not good else "")}">{v}</div></div>'
+        for lbl,v,good in metric_rows
+    )
 
-    # Radar
-    r_buf = radar_img(m, player_name)
-    r_img = RLImage(r_buf, width=7*cm, height=7*cm)
-    analysis_p = Paragraph(enc(re.sub(r'\*\*(.*?)\*\*',r'\1',analysis)), s_body)
-    ra_block = Table([[r_img, analysis_p]],colWidths=[7.5*cm,9.5*cm])
-    ra_block.setStyle(TableStyle([("VALIGN",(0,0),(-1,-1),"TOP"),
-                                   ("LEFTPADDING",(0,0),(-1,-1),0),("RIGHTPADDING",(0,0),(-1,-1),0)]))
-    story.append(HRFlowable(width="100%",thickness=0.5,color=LIGHT,spaceAfter=6))
-    story.append(Paragraph("ANÁLISIS AUTOMÁTICO", s_h2))
-    story.append(ra_block); story.append(Spacer(1,6))
+    # Insights
+    cats_sc = {"Técnica":m["score_technical"],"Decisión":m["score_decision"],
+               "Ataque":m["score_offensive"],"Defensa":m["score_defensive"]}
+    best_cat  = max(cats_sc, key=cats_sc.get)
+    worst_cat = min(cats_sc, key=cats_sc.get)
 
-    # Observations
-    story.append(HRFlowable(width="100%",thickness=0.5,color=LIGHT,spaceAfter=6))
-    story.append(Paragraph("OBSERVACIONES DEL SCOUT", s_h2))
-    obs = observation.strip() if observation else "Sin observaciones registradas."
-    story.append(Paragraph(enc(obs), s_obs))
+    # Analysis — strip markdown bold
+    clean_analysis = _re.sub(r'\*\*(.*?)\*\*', r'\1', analysis)
+    obs_text       = observation.strip() if observation and observation.strip() else "Sin observaciones registradas."
+    radar_svg      = _radar_svg(m)
 
-    # Footer
-    story.append(Spacer(1,16))
-    story.append(HRFlowable(width="100%",thickness=1,color=RED,spaceAfter=4))
-    story.append(Paragraph(f"PIP ONE · {datetime.now().strftime('%d/%m/%Y %H:%M')} · {enc(sess['name'])} · {enc(ex_label)}", s_small))
+    html = f"""<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<title>Informe – {player_name}</title>
+<link href="https://fonts.googleapis.com/css2?family=Bebas+Neue&family=DM+Sans:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+<style>
+  :root {{
+    --black:#0a0a0a; --dark:#111318; --card:#16191f; --border:#252830;
+    --accent:{pc}; --accent2:#ff4757;
+    --text:#f0f2f5; --muted:#6b7280; --good:#4ade80; --warn:#fb923c; --bad:#f87171;
+  }}
+  *{{margin:0;padding:0;box-sizing:border-box;}}
+  @media print{{body{{background:#fff!important;color:#000!important;}}
+    .page{{box-shadow:none!important;border:1px solid #ddd!important;}}
+    *{{-webkit-print-color-adjust:exact;print-color-adjust:exact;}}}}
+  body{{background:#0d0f13;font-family:'DM Sans',sans-serif;color:var(--text);
+    min-height:100vh;display:flex;justify-content:center;align-items:flex-start;padding:40px 20px;}}
+  .page{{width:794px;background:var(--dark);border-radius:16px;overflow:hidden;
+    box-shadow:0 40px 120px rgba(0,0,0,0.8);border:1px solid var(--border);}}
+  .header{{background:var(--black);padding:36px 44px 30px;border-bottom:3px solid var(--accent);
+    display:flex;justify-content:space-between;align-items:flex-end;}}
+  .brand{{font-family:'Bebas Neue',cursive;font-size:13px;letter-spacing:4px;color:var(--accent);margin-bottom:10px;}}
+  .player-name{{font-family:'Bebas Neue',cursive;font-size:54px;line-height:1;color:var(--text);letter-spacing:2px;}}
+  .player-meta{{margin-top:10px;display:flex;gap:20px;flex-wrap:wrap;}}
+  .meta-tag{{font-size:11px;font-weight:600;letter-spacing:1.5px;text-transform:uppercase;
+    color:var(--muted);display:flex;align-items:center;gap:6px;}}
+  .meta-tag span{{color:var(--text);font-weight:500;}}
+  .meta-dot{{width:4px;height:4px;border-radius:50%;background:var(--border);}}
+  .header-right{{text-align:right;flex-shrink:0;}}
+  .rating-label{{font-size:11px;letter-spacing:2px;color:var(--muted);text-transform:uppercase;font-weight:600;}}
+  .rating-value{{font-family:'Bebas Neue',cursive;font-size:86px;line-height:1;color:var(--accent);}}
+  .rating-value sup{{font-size:28px;vertical-align:super;color:var(--muted);font-family:'DM Sans',sans-serif;font-weight:300;}}
+  .rating-badge{{font-size:12px;font-weight:700;letter-spacing:1px;color:var(--accent);
+    background:rgba(255,255,255,0.07);border:1px solid rgba(255,255,255,0.15);
+    border-radius:4px;padding:4px 12px;text-transform:uppercase;display:inline-block;margin-top:4px;}}
+  .body{{padding:36px 44px;}}
+  .section-title{{font-size:10px;font-weight:700;letter-spacing:3px;text-transform:uppercase;
+    color:var(--muted);margin-bottom:16px;display:flex;align-items:center;gap:10px;}}
+  .section-title::after{{content:'';flex:1;height:1px;background:var(--border);}}
+  .scores-grid{{display:grid;grid-template-columns:repeat(4,1fr);gap:12px;margin-bottom:32px;}}
+  .score-card{{background:var(--card);border:1px solid var(--border);border-radius:12px;
+    padding:20px 16px;text-align:center;}}
+  .score-card.highlight{{border-color:var(--accent);}}
+  .score-card.low{{border-color:var(--bad);}}
+  .score-cat{{font-size:10px;font-weight:700;letter-spacing:2px;text-transform:uppercase;color:var(--muted);margin-bottom:10px;}}
+  .score-val{{font-family:'Bebas Neue',cursive;font-size:44px;line-height:1;color:var(--text);}}
+  .score-card.highlight .score-val{{color:var(--accent);}}
+  .score-card.low .score-val{{color:var(--bad);}}
+  .score-weight{{margin-top:8px;font-size:10px;font-weight:600;color:var(--muted);
+    background:rgba(255,255,255,0.04);border-radius:20px;padding:3px 10px;display:inline-block;}}
+  .score-bar{{margin-top:12px;height:3px;background:var(--border);border-radius:2px;overflow:hidden;}}
+  .score-bar-fill{{height:100%;border-radius:2px;background:var(--muted);}}
+  .mid-section{{display:grid;grid-template-columns:220px 1fr;gap:24px;margin-bottom:32px;}}
+  .radar-wrap{{background:var(--card);border:1px solid var(--border);border-radius:12px;
+    display:flex;align-items:center;justify-content:center;padding:20px;}}
+  .metrics-wrap{{background:var(--card);border:1px solid var(--border);border-radius:12px;padding:24px;}}
+  .metrics-grid{{display:grid;grid-template-columns:repeat(3,1fr);gap:0;}}
+  .metric-item{{padding:10px 12px;border-bottom:1px solid var(--border);}}
+  .metric-item:nth-child(3n){{border-right:none;}}
+  .metric-label{{font-size:10px;font-weight:600;letter-spacing:1px;text-transform:uppercase;color:var(--muted);margin-bottom:4px;}}
+  .metric-val{{font-family:'Bebas Neue',cursive;font-size:22px;color:var(--text);}}
+  .metric-val.good{{color:var(--good);}}
+  .metric-val.warn{{color:var(--warn);}}
+  .metric-val.bad{{color:var(--bad);}}
+  .insight-grid{{display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-bottom:28px;}}
+  .insight-card{{background:var(--card);border:1px solid var(--border);border-radius:12px;
+    padding:20px;display:flex;gap:16px;align-items:flex-start;}}
+  .insight-card.strength{{border-color:rgba(74,222,128,0.3);}}
+  .insight-card.area{{border-color:rgba(248,113,113,0.3);}}
+  .insight-icon{{font-size:24px;flex-shrink:0;}}
+  .insight-heading{{font-size:10px;font-weight:700;letter-spacing:2px;text-transform:uppercase;color:var(--muted);margin-bottom:4px;}}
+  .insight-val{{font-family:'Bebas Neue',cursive;font-size:22px;color:var(--text);margin-bottom:2px;}}
+  .insight-sub{{font-size:12px;color:var(--muted);}}
+  .analysis-section{{display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-bottom:8px;}}
+  .analysis-box,.scout-box{{background:var(--card);border:1px solid var(--border);border-radius:12px;padding:22px;}}
+  .analysis-box p{{font-size:13px;line-height:1.7;color:#9ca3af;}}
+  .scout-box blockquote{{font-size:14px;line-height:1.65;color:#cbd5e1;font-style:italic;
+    border-left:3px solid var(--accent);padding-left:14px;margin-top:8px;}}
+  .footer{{background:var(--black);border-top:1px solid var(--border);padding:18px 44px;
+    display:flex;justify-content:space-between;align-items:center;}}
+  .footer-brand{{font-family:'Bebas Neue',cursive;font-size:18px;letter-spacing:3px;color:var(--accent);}}
+  .footer-info{{font-size:11px;color:var(--muted);text-align:right;line-height:1.6;}}
+  .footer-info strong{{color:#8a909a;}}
+</style>
+</head>
+<body>
+<div class="page">
+  <div class="header">
+    <div class="header-left">
+      <div class="brand">PIP ONE &nbsp;·&nbsp; Informe de Jugador</div>
+      <div class="player-name">{player_name}</div>
+      <div class="player-meta">
+        <div class="meta-tag">Posición <span>{pos_label}</span></div>
+        <div class="meta-dot"></div>
+        <div class="meta-tag">Sesión <span>{sess["name"]}</span></div>
+        <div class="meta-dot"></div>
+        <div class="meta-tag">Ejercicio <span>{ex_label}</span></div>
+        <div class="meta-dot"></div>
+        <div class="meta-tag">Fecha <span>{date_str}</span></div>
+        <div class="meta-dot"></div>
+        <div class="meta-tag">Acciones <span>{part_str}</span></div>
+      </div>
+    </div>
+    <div class="header-right">
+      <div class="rating-label">Rating General</div>
+      <div class="rating-value">{r:.1f}<sup>/10</sup></div>
+      <div class="rating-badge">{nivel}</div>
+    </div>
+  </div>
 
-    doc.build(story); buf.seek(0); return buf.read()
+  <div class="body">
+    <div class="section-title">Categorías evaluadas</div>
+    <div class="scores-grid">{score_cards}</div>
+
+    <div class="mid-section">
+      <div class="radar-wrap">{radar_svg}</div>
+      <div class="metrics-wrap">
+        <div class="section-title" style="margin-bottom:12px;">Métricas clave</div>
+        <div class="metrics-grid">{metrics_html}</div>
+      </div>
+    </div>
+
+    <div class="section-title">Fortalezas y áreas de mejora</div>
+    <div class="insight-grid" style="margin-bottom:28px;">
+      <div class="insight-card strength">
+        <div class="insight-icon">⚡</div>
+        <div class="insight-text">
+          <div class="insight-heading">Mayor fortaleza</div>
+          <div class="insight-val">{best_cat} — {cats_sc[best_cat]:.1f}/10</div>
+          <div class="insight-sub">Categoría dominante en esta sesión</div>
+        </div>
+      </div>
+      <div class="insight-card area">
+        <div class="insight-icon">🎯</div>
+        <div class="insight-text">
+          <div class="insight-heading">Mayor margen de mejora</div>
+          <div class="insight-val">{worst_cat} — {cats_sc[worst_cat]:.1f}/10</div>
+          <div class="insight-sub">Área prioritaria de trabajo a desarrollar</div>
+        </div>
+      </div>
+    </div>
+
+    <div class="section-title">Análisis</div>
+    <div class="analysis-section">
+      <div class="analysis-box">
+        <div class="section-title" style="font-size:9px;margin-bottom:12px;">Análisis automático</div>
+        <p>{clean_analysis}</p>
+      </div>
+      <div class="scout-box">
+        <div class="section-title" style="font-size:9px;margin-bottom:14px;color:rgba(255,255,255,0.4);">Observaciones del scout</div>
+        <blockquote>{obs_text}</blockquote>
+      </div>
+    </div>
+  </div>
+
+  <div class="footer">
+    <div class="footer-brand">PIP ONE</div>
+    <div class="footer-info">
+      <strong>{sess["name"].upper()}</strong> &nbsp;·&nbsp; {ex_label} &nbsp;·&nbsp; {date_str}<br>
+      Informe generado automáticamente · Confidencial
+    </div>
+  </div>
+</div>
+</body>
+</html>"""
+    return html.encode("utf-8")
+
 
 # ══════════════════════════════════════════════════════════════════════════════
 # UI HELPERS
@@ -842,42 +971,6 @@ if st.session_state.page == "home":
                 st.session_state.active_session=new_s; st.session_state.active_player=None
                 st.session_state.page="session"; st.rerun()
 
-    with right:
-        st.markdown('<div class="stitle">Sesiones recientes</div>', unsafe_allow_html=True)
-        all_sess = [normalise_session(s) for s in q("SELECT * FROM sessions ORDER BY created_at DESC LIMIT 10")]
-        if not all_sess:
-            st.markdown('<div style="color:#222;font-size:0.88rem;padding:16px;">Sin sesiones todavía.</div>', unsafe_allow_html=True)
-        for s in all_sess:
-            ex_type      = s.get("exercise_type") or "Partido"
-            categoria    = s.get("category") or "Partido"
-            ec           = EX_COLOR.get(ex_type, "#e63946")
-            cat_color    = "#e63946" if categoria == "Partido" else "#2980b9"
-            status_badge = "ABIERTA" if s["status"] == "open" else "CERRADA"
-            status_cls   = "badge-green" if s["status"] == "open" else "badge-gray"
-            n_ev         = ev_count(s["id"])
-            pls          = session_players(s["id"])
-            n_pls        = len(pls)
-            ex_badge     = (f'<span class="badge" style="background:{ec}22;color:{ec};'
-                            f'border:1px solid {ec}44;">{ex_type}</span>')  if categoria == "Entrenamiento" else ""
-            html = (
-                f'<div class="card">' 
-                f'<div style="display:flex;justify-content:space-between;align-items:center;">' 
-                f'<div>' 
-                f'<div style="font-family:Barlow Condensed,sans-serif;font-weight:700;font-size:1rem;color:#fff;">{s["name"]}</div>' 
-                f'<div style="margin-top:4px;display:flex;gap:5px;align-items:center;flex-wrap:wrap;">' 
-                f'<span class="badge" style="background:{cat_color};color:#fff;">{categoria}</span>' 
-                f'{ex_badge}' 
-                f'<span class="badge {status_cls}">{status_badge}</span>' 
-                f'<span style="color:#2a2a2a;font-size:0.72rem;">{fmt_dt(s["created_at"])}</span>' 
-                f'</div></div>' 
-                f'<div style="text-align:right;">' 
-                f'<div style="font-family:Barlow Condensed,sans-serif;font-weight:700;font-size:1.4rem;color:#2a2a2a;">{n_ev}</div>' 
-                f'<div style="font-size:0.65rem;color:#1a1a1a;letter-spacing:1px;">EVENTOS</div>' 
-                f'</div></div>' 
-                f'<div style="margin-top:5px;font-size:0.72rem;color:#2a2a2a;">{n_pls} jugadores</div>' 
-                f'</div>'
-            )
-            st.markdown(html, unsafe_allow_html=True)
 
 # ══════════════════════════════════════════════════════════════════════════════
 # ██ PÁGINA: SESSION
@@ -1330,17 +1423,18 @@ elif st.session_state.page == "report":
                       rsess["id"], rp["id"], one=True)
         obs_text = obs_saved["observation"] if obs_saved else ""
         try:
-            pdf_bytes = make_pdf(rp["name"], rsess, m, atxt, obs_text)
+            html_bytes = make_report_html(rp["name"], rsess, m, atxt, obs_text)
             st.download_button(
-                label="DESCARGAR PDF",
-                data=pdf_bytes,
-                file_name=f"pip_{rp['name'].replace(' ','_')}_{rsess['id']}.pdf",
-                mime="application/pdf",
+                label="DESCARGAR INFORME",
+                data=html_bytes,
+                file_name=f"pip_{rp['name'].replace(' ','_')}_{rsess['id']}.html",
+                mime="text/html",
                 use_container_width=True,
                 type="primary",
             )
+            st.caption("Abre el archivo y usa Ctrl+P → Guardar como PDF.")
         except Exception as e:
-            st.error(f"Error PDF: {e}")
+            st.error(f"Error generando informe: {e}")
 
         # Navigate other players
         if len(pls) > 1:
