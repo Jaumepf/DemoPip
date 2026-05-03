@@ -685,9 +685,9 @@ def _radar_svg(m):
 
 def make_report_html(player_name, sess, m, analysis, observation):
     import re as _re
-    ex_label = ses.get("exercise_type") or "Partido"
+    ex_label = sess.get("exercise_type") or "Partido"
     pos_label = {"GK":"Portero","DEF":"Defensa","MED":"Centrocampista","DEL":"Delantero"}.get(m["position"],m["position"])
-    date_str = fmt_dt(ses.get("created_at",""))[:10]
+    date_str = fmt_dt(sess.get("created_at",""))[:10]
     part_str = f'{m["total_events"]} ({m["participation_rate"]:.0f}% part.)'
     pc = {"GK":"#f59e0b","DEF":"#10b981","MED":"#8b5cf6","DEL":"#ef4444"}.get(m["position"],"#7c3aed")
     r = m["rating"]
@@ -1141,7 +1141,7 @@ def render_analisis_tecnico():
                 st.session_state.active_session = None; go_nav("Sesiones")
         st.markdown("</div>",unsafe_allow_html=True); return
 
-    ex_key = ses.get("exercise_type") or "Partido"
+    ex_key = sess.get("exercise_type") or "Partido"
     ec = EX_COLOR.get(ex_key,"#7c3aed")
     cat_color = "#7c3aed" if sess["category"]=="Partido" else "#3b82f6"
 
@@ -1416,7 +1416,7 @@ def render_reportes():
     sel_pl = st.selectbox("Jugador", pl_names, index=cur_pl_idx, key="rep_pl_sel", label_visibility="collapsed")
     rp = next(p for p in pls if p["name"]==sel_pl); st.session_state.report_player = rp
 
-    ex_key = rses.get("exercise_type") or "Partido"
+    ex_key = rsess.get("exercise_type") or "Partido"
     m = _one("player_metrics", {"session_id": rsess["id"], "player_id": rp["id"]})
     if not m:
         st.warning("Sin métricas calculadas para este jugador."); st.markdown("</div>",unsafe_allow_html=True); return
