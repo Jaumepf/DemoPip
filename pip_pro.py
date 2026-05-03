@@ -4,13 +4,84 @@ Splash · Login · Dashboard · Sesiones · Jugadores · Análisis Técnico (PIP
 """
 
 import streamlit as st
-import sqlite3, os, io, uuid, re, time as _match_time
+import io, uuid, re, time as _match_time
 from datetime import datetime
 import numpy as np
 import matplotlib; matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 
 DB_PATH = "pip_one.db"
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# SUPABASE
+# ══════════════════════════════════════════════════════════════════════════════
+SUPABASE_URL = "https://qknilpypekeytixvgobd.supabase.co"
+SUPABASE_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InFrbmlscHlwZWtleXRpeHZnb2JkIiwicm9sZSI6ImFub24iLCJpYXQiOjE3Nzc4MzM2NDYsImV4cCI6MjA5MzQwOTY0Nn0.q0bCAMbtdDM1_p-5afkE4MIR2-FnTpA_KfWJoWl96Vw"
+
+@st.cache_resource
+def get_sb():
+    from supabase import create_client
+    return create_client(SUPABASE_URL, SUPABASE_KEY)
+
+def _q(table, filters=None, order=None, desc_order=False, limit=None, columns="*"):
+    q = get_sb().table(table).select(columns)
+    if filters:
+        for k, v in filters.items():
+            q = q.eq(k, v)
+    if order:
+        q = q.order(order, desc=desc_order)
+    if limit:
+        q = q.limit(limit)
+    try:
+        return q.execute().data or []
+    except:
+        return []
+
+def _one(table, filters=None, order=None, desc_order=False):
+    rows = _q(table, filters, order, desc_order, limit=1)
+    return rows[0] if rows else None
+
+def _ins(table, data):
+    try:
+        get_sb().table(table).insert(data).execute()
+    except Exception as e:
+        st.error(f"Error BD: {e}")
+
+def _upd(table, data, filters):
+    q = get_sb().table(table).update(data)
+    for k, v in filters.items():
+        q = q.eq(k, v)
+    try:
+        q.execute()
+    except Exception as e:
+        st.error(f"Error BD: {e}")
+
+def _del(table, filters):
+    q = get_sb().table(table).delete()
+    for k, v in filters.items():
+        q = q.eq(k, v)
+    try:
+        q.execute()
+    except Exception as e:
+        st.error(f"Error BD: {e}")
+
+def _cnt(table, filters=None):
+    return len(_q(table, filters, columns="id"))
+
+def auth_login(email, password):
+    try:
+        res = get_sb().auth.sign_in_with_password({"email": email, "password": password})
+        return res.user, None
+    except Exception as e:
+        return None, str(e)
+
+def auth_signup(email, password):
+    try:
+        res = get_sb().auth.sign_up({"email": email, "password": password})
+        return res.user, None
+    except Exception as e:
+        return None, str(e)
 
 st.set_page_config(
     page_title="PIP PRO",
@@ -265,93 +336,6 @@ hr { border-color: rgba(255,255,255,0.08) !important; }
 </style>
 """, unsafe_allow_html=True)
 
-# ══════════════════════════════════════════════════════════════════════════════
-# BASE DE DATOS
-# ══════════════════════════════════════════════════════════════════════════════
-def get_conn():
-    c = sqlite3.connect(DB_PATH, check_same_thread=False)
-    c.row_factory = sqlite3.Row
-    return c
-
-def init_db():
-    c = get_conn()
-    c.executescript("""
-    CREATE TABLE IF NOT EXISTS sessions (
-        id TEXT PRIMARY KEY, name TEXT NOT NULL, group_name TEXT,
-        category TEXT NOT NULL, exercise_type TEXT,
-        status TEXT DEFAULT 'open', created_at TEXT, closed_at TEXT
-    );
-    CREATE TABLE IF NOT EXISTS players (
-        id TEXT PRIMARY KEY, name TEXT NOT NULL UNIQUE,
-        position TEXT DEFAULT 'MED', created_at TEXT
-    );
-    CREATE TABLE IF NOT EXISTS session_players (
-        session_id TEXT, player_id TEXT, PRIMARY KEY(session_id, player_id)
-    );
-    CREATE TABLE IF NOT EXISTS events (
-        id TEXT PRIMARY KEY, session_id TEXT NOT NULL, player_id TEXT NOT NULL,
-        event_type TEXT NOT NULL, event_cat TEXT NOT NULL, ts TEXT, created_at TEXT
-    );
-    CREATE TABLE IF NOT EXISTS player_metrics (
-        id TEXT PRIMARY KEY, session_id TEXT NOT NULL, player_id TEXT NOT NULL,
-        position TEXT, exercise_type TEXT,
-        w_technical REAL, w_decision REAL, w_offensive REAL, w_defensive REAL,
-        total_events INTEGER DEFAULT 0, save_rate REAL DEFAULT 0, exit_rate REAL DEFAULT 0,
-        short_pass_acc REAL DEFAULT 0, long_pass_acc REAL DEFAULT 0,
-        total_saves INTEGER DEFAULT 0, great_saves INTEGER DEFAULT 0,
-        pass_accuracy REAL DEFAULT 0, control_accuracy REAL DEFAULT 0,
-        decision_score REAL DEFAULT 0, dribble_accuracy REAL DEFAULT 0,
-        duel_accuracy REAL DEFAULT 0, total_shots INTEGER DEFAULT 0,
-        shots_on_target INTEGER DEFAULT 0, goals INTEGER DEFAULT 0,
-        offensive_actions INTEGER DEFAULT 0, defensive_actions INTEGER DEFAULT 0,
-        recoveries INTEGER DEFAULT 0, interceptions INTEGER DEFAULT 0, errors INTEGER DEFAULT 0,
-        participation_rate REAL DEFAULT 0,
-        score_technical REAL DEFAULT 0, score_decision REAL DEFAULT 0,
-        score_offensive REAL DEFAULT 0, score_defensive REAL DEFAULT 0,
-        rating REAL DEFAULT 0, calculated_at TEXT
-    );
-    CREATE TABLE IF NOT EXISTS scout_observations (
-        id TEXT PRIMARY KEY, session_id TEXT NOT NULL, player_id TEXT NOT NULL,
-        observation TEXT DEFAULT '', updated_at TEXT
-    );
-    """)
-    c.commit(); c.close()
-
-def migrate_db():
-    c = get_conn()
-    for table, col, col_def in [
-        ("sessions","category","TEXT DEFAULT 'Partido'"),
-        ("sessions","exercise_type","TEXT DEFAULT 'Partido'"),
-        ("players","position","TEXT DEFAULT 'MED'"),
-        ("player_metrics","position","TEXT DEFAULT 'MED'"),
-        ("player_metrics","exercise_type","TEXT DEFAULT 'Partido'"),
-        ("player_metrics","w_technical","REAL DEFAULT 0.25"),
-        ("player_metrics","w_decision","REAL DEFAULT 0.25"),
-        ("player_metrics","w_offensive","REAL DEFAULT 0.25"),
-        ("player_metrics","w_defensive","REAL DEFAULT 0.25"),
-        ("player_metrics","save_rate","REAL DEFAULT 0"),
-        ("player_metrics","exit_rate","REAL DEFAULT 0"),
-        ("player_metrics","short_pass_acc","REAL DEFAULT 0"),
-        ("player_metrics","long_pass_acc","REAL DEFAULT 0"),
-        ("player_metrics","total_saves","INTEGER DEFAULT 0"),
-        ("player_metrics","great_saves","INTEGER DEFAULT 0"),
-    ]:
-        try: c.execute(f"ALTER TABLE {table} ADD COLUMN {col} {col_def}")
-        except: pass
-    c.commit(); c.close()
-
-init_db(); migrate_db()
-
-def q(sql, *args, one=False, write=False):
-    c = get_conn(); cur = c.execute(sql, args)
-    if write: c.commit(); c.close(); return
-    rows = cur.fetchone() if one else cur.fetchall()
-    c.close()
-    return (dict(rows) if rows else None) if one else [dict(r) for r in rows]
-
-def insert(sql, *args):
-    c = get_conn(); c.execute(sql, args); c.commit(); c.close()
-
 def normalise_session(s):
     if not s: return s
     s = dict(s); s.setdefault("category","Partido"); s.setdefault("exercise_type","Partido")
@@ -366,8 +350,12 @@ def normalise_player(p):
     return p
 
 def fmt_dt(iso):
-    try: return datetime.fromisoformat(iso).strftime("%d/%m/%Y %H:%M")
-    except: return iso or "—"
+    if not iso: return "—"
+    try:
+        s = str(iso).replace("Z", "+00:00")
+        return datetime.fromisoformat(s).strftime("%d/%m/%Y %H:%M")
+    except:
+        return str(iso)[:16]
 
 def pos_color(pos):
     return {"GK":"#f59e0b","DEF":"#10b981","MED":"#8b5cf6","DEL":"#ef4444"}.get(pos,"#6b7280")
@@ -464,8 +452,14 @@ FIELD_EVENTS = {
     "corner_won":{"label":"Córner ganado","color":"#f97316","cat":"offensive"},
     "recovery":{"label":"Recuperación","color":"#8b5cf6","cat":"defensive"},
     "interception":{"label":"Intercepción","color":"#7c3aed","cat":"defensive"},
-    "duel_won":{"label":"Duelo ✓","color":"#10b981","cat":"defensive"},
-    "duel_lost":{"label":"Duelo ✗","color":"#ef4444","cat":"defensive"},
+    "duel_off_won":{"label":"Duelo ofensivo ✓","color":"#10b981","cat":"offensive"},
+    "duel_off_lost":{"label":"Duelo ofensivo ✗","color":"#ef4444","cat":"offensive"},
+    "duel_def_won":{"label":"Duelo defensivo ✓","color":"#10b981","cat":"defensive"},
+    "duel_def_lost":{"label":"Duelo defensivo ✗","color":"#ef4444","cat":"defensive"},
+    "aerial_off_won":{"label":"Aéreo ofensivo ✓","color":"#34d399","cat":"offensive"},
+    "aerial_off_lost":{"label":"Aéreo ofensivo ✗","color":"#dc2626","cat":"offensive"},
+    "aerial_def_won":{"label":"Aéreo defensivo ✓","color":"#3b82f6","cat":"defensive"},
+    "aerial_def_lost":{"label":"Aéreo defensivo ✗","color":"#ef4444","cat":"defensive"},
     "pressing_success":{"label":"Pressing ✓","color":"#10b981","cat":"defensive"},
     "pressing_fail":{"label":"Pressing ✗","color":"#ef4444","cat":"defensive"},
     "foul_received":{"label":"Falta recibida","color":"#3b82f6","cat":"general"},
@@ -478,7 +472,10 @@ FIELD_LAYOUT = [
     ("pass_success","pass_fail"),("control_success","control_fail"),("header_success","header_fail"),
     ("decision_correct","decision_wrong"),("shot","shot_on_target"),("goal","assist"),
     ("dribble_success","dribble_fail"),("corner_won",None),
-    ("recovery","interception"),("duel_won","duel_lost"),("pressing_success","pressing_fail"),
+    ("duel_off_won","duel_off_lost"),
+    ("duel_def_won","duel_def_lost"),
+    ("aerial_off_won","aerial_off_lost"),
+    ("aerial_def_won","aerial_def_lost"),
     ("foul_received","foul_committed"),("offside","ball_loss"),("error",None),
 ]
 ALL_EVENTS = {**GK_EVENTS, **FIELD_EVENTS}
@@ -531,7 +528,11 @@ def compute_metrics(events_list, position, exercise_key):
         sh,sot = cnt("shot"),cnt("shot_on_target"); gl = cnt("goal"); ast = cnt("assist")
         drs,drf = cnt("dribble_success"),cnt("dribble_fail"); crn = cnt("corner_won")
         rec,icp = cnt("recovery"),cnt("interception")
-        duw,dul = cnt("duel_won"),cnt("duel_lost")
+        duw_off=cnt("duel_off_won"); dul_off=cnt("duel_off_lost")
+        duw_def=cnt("duel_def_won"); dul_def=cnt("duel_def_lost")
+        aer_ow=cnt("aerial_off_won"); aer_ol=cnt("aerial_off_lost")
+        aer_dw=cnt("aerial_def_won"); aer_dl=cnt("aerial_def_lost")
+        duw=duw_off+duw_def+aer_ow+aer_dw; dul=dul_off+dul_def+aer_ol+aer_dl
         prs,prf = cnt("pressing_success"),cnt("pressing_fail")
         f_recv,f_comm = cnt("foul_received"),cnt("foul_committed")
         offsides,bl,err = cnt("offside"),cnt("ball_loss"),cnt("error")
@@ -547,9 +548,9 @@ def compute_metrics(events_list, position, exercise_key):
         tech = max(0, (pa*0.45+ca*0.35+ha*0.20) - neg_pen*0.6)
         dec = max(0, da - neg_pen*0.4)
         drb_score = dra if (drs+drf)>0 else 0.5
-        off_total = sh+sot+gl+drs+ast+crn
-        off = (min(off_total/6.0,1.0)*0.35+(sot/max(sh+0.01,1))*0.25+min(gl,1)*0.15+min(ast/2,1)*0.10+drb_score*0.10+min(f_recv*0.02,0.05))
-        def_total = rec+icp+duw+prs
+        off_total = sh+sot+gl+drs+ast+crn+duw_off+aer_ow
+        off = (min(off_total/7.0,1.0)*0.35+(sot/max(sh+0.01,1))*0.25+min(gl,1)*0.15+min(ast/2,1)*0.10+drb_score*0.10+min(f_recv*0.02,0.05))
+        def_total = rec+icp+duw_def+aer_dw+prs
         defe = (min(def_total/6.0,1.0)*0.45+dua*0.30+pra*0.25)
         g = tech*w["technical"]+dec*w["decision"]+off*w["offensive"]+defe*w["defensive"]
         g = min(g+part*0.4, 1.0)
@@ -569,25 +570,41 @@ def compute_metrics(events_list, position, exercise_key):
         }
 
 def close_and_compute(session_id, exercise_key):
-    for p in q("SELECT p.* FROM players p JOIN session_players sp ON sp.player_id=p.id WHERE sp.session_id=?", session_id):
-        evs = q("SELECT * FROM events WHERE session_id=? AND player_id=?", session_id, p["id"])
+    sess_info = _one("sessions", {"id": session_id}) or {}
+    is_partido = (sess_info.get("category") or "Partido") == "Partido"
+    for p in session_players(session_id):
+        evs = _q("events", {"session_id": session_id, "player_id": p["id"]})
         m = compute_metrics(evs, p["position"], exercise_key)
         if not m: continue
-        c = get_conn()
-        c.execute("DELETE FROM player_metrics WHERE session_id=? AND player_id=?", (session_id, p["id"]))
-        c.execute("""INSERT INTO player_metrics VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
-            (str(uuid.uuid4())[:12], session_id, p["id"], p["position"], exercise_key,
-             m["w_technical"],m["w_decision"],m["w_offensive"],m["w_defensive"],
-             m["total_events"],m["save_rate"],m["exit_rate"],m["short_pass_acc"],m["long_pass_acc"],
-             m["total_saves"],m["great_saves"],m["pass_accuracy"],m["control_accuracy"],
-             m["decision_score"],m["dribble_accuracy"],m["duel_accuracy"],m["total_shots"],
-             m["shots_on_target"],m["goals"],m["offensive_actions"],m["defensive_actions"],
-             m["recoveries"],m["interceptions"],m["errors"],m["participation_rate"],
-             m["score_technical"],m["score_decision"],m["score_offensive"],m["score_defensive"],
-             m["rating"],datetime.now().isoformat()))
-        c.commit(); c.close()
-    q("UPDATE sessions SET status='closed', closed_at=? WHERE id=?", datetime.now().isoformat(), session_id, write=True)
-
+        # Override participation with minutes if partido
+        mins = player_minutes(p, is_partido)
+        if mins is not None:
+            m["participation_rate"] = round(min(mins / 90.0, 1.0) * 100, 1)
+        m["is_starter"]    = p.get("is_starter", True)
+        m["entry_minute"]  = p.get("entry_minute") or 0
+        m["exit_minute"]   = p.get("exit_minute")
+        _del("player_metrics", {"session_id": session_id, "player_id": p["id"]})
+        _ins("player_metrics", {
+            "id": str(uuid.uuid4())[:12], "session_id": session_id, "player_id": p["id"],
+            "position": p["position"], "exercise_type": exercise_key,
+            "w_technical": m["w_technical"], "w_decision": m["w_decision"],
+            "w_offensive": m["w_offensive"], "w_defensive": m["w_defensive"],
+            "total_events": m["total_events"], "save_rate": m["save_rate"],
+            "exit_rate": m["exit_rate"], "short_pass_acc": m["short_pass_acc"],
+            "long_pass_acc": m["long_pass_acc"], "total_saves": m["total_saves"],
+            "great_saves": m["great_saves"], "pass_accuracy": m["pass_accuracy"],
+            "control_accuracy": m["control_accuracy"], "decision_score": m["decision_score"],
+            "dribble_accuracy": m["dribble_accuracy"], "duel_accuracy": m["duel_accuracy"],
+            "total_shots": m["total_shots"], "shots_on_target": m["shots_on_target"],
+            "goals": m["goals"], "offensive_actions": m["offensive_actions"],
+            "defensive_actions": m["defensive_actions"], "recoveries": m["recoveries"],
+            "interceptions": m["interceptions"], "errors": m["errors"],
+            "participation_rate": m["participation_rate"], "score_technical": m["score_technical"],
+            "score_decision": m["score_decision"], "score_offensive": m["score_offensive"],
+            "score_defensive": m["score_defensive"], "rating": m["rating"],
+            "calculated_at": datetime.now().isoformat()
+        })
+    _upd("sessions", {"status": "closed", "closed_at": datetime.now().isoformat()}, {"id": session_id})
 def analysis_text(player_name, m, exercise_key):
     r = m["rating"]; pos = m["position"]
     nivel = "excepcional" if r>=8 else ("muy bueno" if r>=6.5 else ("correcto" if r>=5 else "mejorable"))
@@ -668,9 +685,9 @@ def _radar_svg(m):
 
 def make_report_html(player_name, sess, m, analysis, observation):
     import re as _re
-    ex_label = sess.get("exercise_type") or "Partido"
+    ex_label = ses.get("exercise_type") or "Partido"
     pos_label = {"GK":"Portero","DEF":"Defensa","MED":"Centrocampista","DEL":"Delantero"}.get(m["position"],m["position"])
-    date_str = fmt_dt(sess.get("created_at",""))[:10]
+    date_str = fmt_dt(ses.get("created_at",""))[:10]
     part_str = f'{m["total_events"]} ({m["participation_rate"]:.0f}% part.)'
     pc = {"GK":"#f59e0b","DEF":"#10b981","MED":"#8b5cf6","DEL":"#ef4444"}.get(m["position"],"#7c3aed")
     r = m["rating"]
@@ -753,7 +770,7 @@ def make_report_html(player_name, sess, m, analysis, observation):
 <div class="mid-section"><div class="radar-wrap">{radar_svg}</div>
 <div class="metrics-wrap"><div class="section-title" style="margin-bottom:12px;">Métricas clave</div>
 <div class="metrics-grid">
-{''.join(f'<div class="metric-item"><div class="metric-label">{lbl}</div><div class="metric-val {"good" if m.get(k,0)>0 else ""}">{"—" if m.get(k,0)==0 else m.get(k,0)}</div></div>' for lbl,k in [("Rating",None),("Total eventos","total_events"),("Participación %","participation_rate")])}
+{''.join(f'<div class="metric-item"><div class="metric-label">{lbl}</div><div class="metric-val {"good" if m.get(k,0)>0 else ""}">{"—" if m.get(k,0)==0 else m.get(k,0)}</div></div>' for lbl,k in [("Rating",None),("Todal eventos","total_events"),("Participación %","participation_rate")])}
 </div></div></div>
 <div class="section-title">Fortalezas y áreas de mejora</div>
 <div class="insight-grid">
@@ -786,11 +803,33 @@ def sbar(label, value, color="#7c3aed", max_val=10.0):
             f'<div class="sbar-val" style="color:{color};">{value:.1f}</div></div>')
 
 def ev_count(sid, pid=None):
-    if pid: return q("SELECT COUNT(*) c FROM events WHERE session_id=? AND player_id=?",sid,pid,one=True)["c"]
-    return q("SELECT COUNT(*) c FROM events WHERE session_id=?",sid,one=True)["c"]
+    if pid: return _cnt("events", {"session_id": sid, "player_id": pid})
+    return _cnt("events", {"session_id": sid})
 
 def session_players(sid):
-    return [normalise_player(p) for p in q("SELECT p.* FROM players p JOIN session_players sp ON sp.player_id=p.id WHERE sp.session_id=? ORDER BY p.name", sid)]
+    sp_rows = _q("session_players", {"session_id": sid})
+    if not sp_rows: return []
+    sp_map = {r["player_id"]: r for r in sp_rows}
+    all_p = _q("players", order="name")
+    result = []
+    for p in all_p:
+        if p["id"] in sp_map:
+            np = normalise_player(p)
+            sd = sp_map[p["id"]]
+            np["is_starter"]   = sd.get("is_starter", True)
+            np["entry_minute"] = sd.get("entry_minute") or 0
+            np["exit_minute"]  = sd.get("exit_minute")
+            result.append(np)
+    return result
+
+def player_minutes(p, is_partido=True, total_min=90):
+    """Minutos jugados según titular/suplente."""
+    if not is_partido: return None
+    entry = p.get("entry_minute") or 0
+    exit_m = p.get("exit_minute")
+    if exit_m is not None:
+        return max(0, exit_m - entry)
+    return max(0, total_min - entry)
 
 # ══════════════════════════════════════════════════════════════════════════════
 # STATE
@@ -888,15 +927,15 @@ def render_dashboard():
                 '<div class="page-sub">Resumen general de actividad</div></div>', unsafe_allow_html=True)
     st.markdown("<div style='padding:0 2rem;'>", unsafe_allow_html=True)
 
-    total_sess = len(q("SELECT id FROM sessions"))
-    open_sess  = len(q("SELECT id FROM sessions WHERE status='open'"))
-    total_pl   = len(q("SELECT id FROM players"))
-    total_ev   = q("SELECT COUNT(*) c FROM events",one=True)["c"]
-    closed_s   = q("SELECT id FROM sessions WHERE status='closed'")
-    avg_rating = 0.0
-    if closed_s:
-        ratings = q("SELECT AVG(rating) r FROM player_metrics")
-        avg_rating = ratings[0]["r"] or 0.0 if ratings else 0.0
+    total_sess = _cnt("sessions")
+    open_sess  = _cnt("sessions", {"status": "open"})
+    total_pl   = _cnt("players")
+    total_ev   = _cnt("events")
+    closed_s   = _q("sessions", {"status": "closed"}, columns="id")
+    _all_r = _q("player_metrics", columns="rating")
+    avg_rating = round(sum(r["rating"] for r in _all_r)/len(_all_r),1) if _all_r else 0.0
+
+
 
     c1,c2,c3,c4 = st.columns(4)
     with c1: st.metric("Sesiones totales", total_sess)
@@ -909,7 +948,7 @@ def render_dashboard():
 
     with d1:
         st.markdown('<div class="stitle">Últimas sesiones</div>', unsafe_allow_html=True)
-        recent = [normalise_session(s) for s in q("SELECT * FROM sessions ORDER BY created_at DESC LIMIT 6")]
+        recent = [normalise_session(s) for s in _q("sessions", order="created_at", desc_order=True, limit=6)]
         if recent:
             rows = ""
             for s in recent:
@@ -980,15 +1019,15 @@ def render_sesiones():
                 st.error("El nombre es obligatorio.")
             else:
                 sid = str(uuid.uuid4())[:12]
-                insert("INSERT INTO sessions VALUES (?,?,?,?,?,?,?,?)",
-                       sid, sess_name.strip(), group_name.strip(),
-                       cat_sel, exercise_type, "open", datetime.now().isoformat(), None)
-                new_s = normalise_session(q("SELECT * FROM sessions WHERE id=?", sid, one=True))
+                _ins("sessions", {"id": sid, "name": sess_name.strip(), "group_name": group_name.strip(), "category": cat_sel, "exercise_type": exercise_type, "status": "open", "created_at": datetime.now().isoformat(), "closed_at": None})
+
+
+                new_s = normalise_session(_one("sessions", {"id": sid}))
                 st.session_state.active_session = new_s; st.session_state.active_player = None
                 go_nav("Análisis Técnico")
 
     st.divider()
-    all_sessions = [normalise_session(s) for s in q("SELECT * FROM sessions ORDER BY created_at DESC")]
+    all_sessions = [normalise_session(s) for s in _q("sessions", order="created_at", desc_order=True)]
     if not all_sessions:
         st.markdown('<div class="pip-card"><div class="empty-state"><div class="empty-icon">☰</div><div class="empty-title">Sin sesiones</div><div class="empty-sub">Crea tu primera sesión arriba</div></div></div>', unsafe_allow_html=True)
     else:
@@ -1016,7 +1055,7 @@ def render_sesiones():
                     if n_ev > 0:
                         if st.button("⏹ Cerrar", key=f"close_{s['id']}", use_container_width=True):
                             close_and_compute(s["id"], s.get("exercise_type","Partido"))
-                            closed = normalise_session(q("SELECT * FROM sessions WHERE id=?", s["id"], one=True))
+                            closed = normalise_session(_one("sessions", {"id": s["id"]}))
                             pls2 = session_players(s["id"])
                             st.session_state.report_session = closed
                             st.session_state.report_player = pls2[0] if pls2 else None
@@ -1048,24 +1087,24 @@ def render_jugadores():
         if st.button("Añadir jugador →", use_container_width=True, key="jug_add"):
             name = new_pname.strip()
             if name:
-                existing = q("SELECT id FROM players WHERE name=?", name, one=True)
-                if existing:
-                    q("UPDATE players SET position=? WHERE id=?", new_ppos, existing["id"], write=True)
-                    st.success("Posición actualizada.")
+                existing = _one("players", {"name": name})
+
+                if existing: pid=existing["id"]; _upd("players",{"position":new_ppos},{"id":pid}); st.success("Posición actualizada.")
+
                 else:
                     pid = str(uuid.uuid4())[:12]
-                    insert("INSERT INTO players VALUES (?,?,?,?)", pid, name, new_ppos, datetime.now().isoformat())
+                    _ins("players", {"id": pid, "name": name, "position": new_ppos, "created_at": datetime.now().isoformat()})
                     st.success(f"Jugador {name} añadido.")
                 st.rerun()
 
-    players = [normalise_player(p) for p in q("SELECT * FROM players ORDER BY name")]
+    players = [normalise_player(p) for p in _q("players", order="name")]
     if not players:
         st.markdown('<div class="pip-card" style="margin-top:1rem;"><div class="empty-state"><div class="empty-icon">👤</div><div class="empty-title">Sin jugadores registrados</div><div class="empty-sub">Añade jugadores desde el panel superior o al crear una sesión</div></div></div>', unsafe_allow_html=True)
     else:
         rows = ""
         for p in players:
-            pc = pos_color(p["position"]); n_sess = len(q("SELECT session_id FROM session_players WHERE player_id=?", p["id"]))
-            last_m = q("SELECT rating, calculated_at FROM player_metrics WHERE player_id=? ORDER BY calculated_at DESC LIMIT 1", p["id"], one=True)
+            pc = pos_color(p["position"]); n_sess = _cnt("session_players", {"player_id": p["id"]})
+            last_m = _one("player_metrics", {"player_id": p["id"]}, order="calculated_at", desc_order=True)
             rating_str = f'{last_m["rating"]:.1f}' if last_m else "—"
             rows += f'<tr><td style="font-weight:500;color:#e5e7eb;">{p["name"]}</td><td><span style="font-size:10px;font-weight:700;padding:2px 8px;border-radius:10px;background:{pc}22;color:{pc};border:1px solid {pc}44;">{p["position"]}</span></td><td>{POS_NAMES[p["position"]]}</td><td style="text-align:center;">{n_sess}</td><td style="text-align:center;font-weight:700;color:#a78bfa;">{rating_str}</td></tr>'
         st.markdown(f'<div class="pip-card" style="padding:0;overflow:hidden;margin-top:1rem;"><table class="pip-table"><thead><tr><th>Jugador</th><th>Pos.</th><th>Posición</th><th style="text-align:center;">Sesiones</th><th style="text-align:center;">Último rating</th></tr></thead><tbody>{rows}</tbody></table></div>', unsafe_allow_html=True)
@@ -1084,7 +1123,7 @@ def render_analisis_tecnico():
         if st.button("Ir a Sesiones →", key="at_go_sess"): go_nav("Sesiones")
         st.markdown("</div>", unsafe_allow_html=True); return
 
-    sess = normalise_session(q("SELECT * FROM sessions WHERE id=?", sess_obj["id"], one=True))
+    sess = normalise_session(_one("sessions", {"id": sess_obj["id"]}))
     if not sess: st.error("Sesión no encontrada."); st.markdown("</div>",unsafe_allow_html=True); return
     st.session_state.active_session = sess
 
@@ -1102,7 +1141,7 @@ def render_analisis_tecnico():
                 st.session_state.active_session = None; go_nav("Sesiones")
         st.markdown("</div>",unsafe_allow_html=True); return
 
-    ex_key = sess.get("exercise_type") or "Partido"
+    ex_key = ses.get("exercise_type") or "Partido"
     ec = EX_COLOR.get(ex_key,"#7c3aed")
     cat_color = "#7c3aed" if sess["category"]=="Partido" else "#3b82f6"
 
@@ -1126,36 +1165,53 @@ def render_analisis_tecnico():
         with st.expander("Añadir jugador"):
             new_pname = st.text_input("Nombre", key="at_pname", label_visibility="collapsed", placeholder="Nombre del jugador")
             new_ppos  = st.radio("Pos", POSITIONS, format_func=lambda p: f"{p}", horizontal=True, key="at_ppos", label_visibility="collapsed")
+            _rol = st.radio("Rol", ["Titular","Suplente"], horizontal=True, key="at_rol")
+            _entry_min = 0
+            if _rol == "Suplente":
+                _entry_min = st.number_input("Minuto de entrada", min_value=0, max_value=120, value=46, step=1, key="at_entry_min")
             if st.button("Añadir a sesión", use_container_width=True, key="at_addp"):
                 name = new_pname.strip()
                 if name:
-                    existing = q("SELECT id FROM players WHERE name=?", name, one=True)
-                    if existing:
-                        pid = existing["id"]
-                        q("UPDATE players SET position=? WHERE id=?", new_ppos, pid, write=True)
-                    else:
-                        pid = str(uuid.uuid4())[:12]
-                        insert("INSERT INTO players VALUES (?,?,?,?)", pid, name, new_ppos, datetime.now().isoformat())
-                    insert("INSERT OR IGNORE INTO session_players VALUES (?,?)", sess["id"], pid)
+                    existing = _one("players", {"name": name})
+                    if existing: pid = existing["id"]; _upd("players", {"position": new_ppos}, {"id": pid})
+                    else: pid = str(uuid.uuid4())[:12]; _ins("players", {"id": pid, "name": name, "position": new_ppos, "created_at": datetime.now().isoformat()})
+                    if not _one("session_players", {"session_id": sess["id"], "player_id": pid}):
+                        _ins("session_players", {"session_id": sess["id"], "player_id": pid, "is_starter": (_rol=="Titular"), "entry_minute": int(_entry_min), "exit_minute": None})
                     pls = session_players(sess["id"])
                     if not st.session_state.active_player: st.session_state.active_player = pls[0]
                     st.rerun()
-
         pls = session_players(sess["id"])
         if not pls:
             st.markdown('<div style="color:#1f2937;font-size:.82rem;padding:10px;">Añade jugadores para empezar.</div>', unsafe_allow_html=True)
         else:
             for p in pls:
                 ia = st.session_state.active_player and st.session_state.active_player["id"]==p["id"]
-                ne = ev_count(sess["id"], p["id"]); pc = pos_color(p["position"])
-                if st.button(f"{'▶ ' if ia else ''}{p['name']}  [{p['position']}]  ({ne})", key=f"at_selp_{p['id']}", use_container_width=True):
+                ne = ev_count(sess["id"], p["id"])
+                is_sub = not p.get("is_starter", True)
+                entry_m = p.get("entry_minute") or 0
+                exit_m  = p.get("exit_minute")
+                rol_tag = f"[S {entry_m}']" if is_sub else (f"[T→{exit_m}']" if exit_m else "[T]")
+                subbed_out = exit_m is not None
+                label = f"{'▶ ' if ia else ''}{'⏹ ' if subbed_out else ''}{p['name']} [{p['position']}] {rol_tag} ({ne} ev)"
+                if st.button(label, key=f"at_selp_{p['id']}", use_container_width=True, disabled=subbed_out):
                     st.session_state.active_player = p; st.rerun()
-                st.markdown(f'<div style="background:{"rgba(124,58,237,0.1)" if ia else "transparent"};border-left:{"2px solid #7c3aed" if ia else "none"};height:2px;margin-top:-10px;margin-bottom:4px;border-radius:0 0 4px 4px;"></div>', unsafe_allow_html=True)
+            # Sustituir jugador activo
+            ap_act = st.session_state.active_player
+            if ap_act:
+                # Refresh from DB to get current exit_minute
+                _sp_fresh = [x for x in session_players(sess["id"]) if x["id"]==ap_act["id"]]
+                if _sp_fresh and _sp_fresh[0].get("exit_minute") is None:
+                    with st.expander("🔄 Sustituir jugador activo"):
+                        st.markdown(f'<div style="font-size:11px;color:#9ca3af;margin-bottom:6px;">Jugador: <strong>{ap_act["name"]}</strong></div>', unsafe_allow_html=True)
+                        _sub_min = st.number_input("Minuto de sustitución", min_value=1, max_value=120, value=46, step=1, key="sub_min_input")
+                        if st.button("Confirmar sustitución", use_container_width=True, key="sub_confirm", type="primary"):
+                            _upd("session_players", {"exit_minute": int(_sub_min)}, {"session_id": sess["id"], "player_id": ap_act["id"]})
+                            st.session_state.active_player = None; st.rerun()
 
-        # Event log
+        
         st.divider()
         st.markdown('<div class="stitle">Últimos eventos</div>', unsafe_allow_html=True)
-        all_evs = q("SELECT * FROM events WHERE session_id=? ORDER BY created_at DESC LIMIT 10", sess["id"])
+        all_evs = _q("events", {"session_id": sess["id"]}, order="created_at", desc_order=True, limit=10)
         p_map = {p["id"]:p for p in pls}
         if all_evs:
             for e in all_evs:
@@ -1174,9 +1230,25 @@ def render_analisis_tecnico():
         ap = st.session_state.active_player
         if ap and all_evs:
             if st.button("↩ Deshacer último", use_container_width=True, key="at_undo"):
-                r = q("SELECT id FROM events WHERE session_id=? AND player_id=? ORDER BY created_at DESC LIMIT 1", sess["id"], ap["id"], one=True)
-                if r: q("DELETE FROM events WHERE id=?", r["id"], write=True)
+                r = _one("events", {"session_id": sess["id"], "player_id": ap["id"]}, order="created_at", desc_order=True)
+                if r: _del("events", {"id": r["id"]})
                 st.rerun()
+        # ── Corregir evento ───────────────────────────────────
+        if all_evs:
+            with st.expander("✏️ Corregir un evento"):
+                _pls_edit = session_players(sess["id"])
+                _pmap_edit = {p["id"]: p for p in _pls_edit}
+                ev_labels = [f"{e.get('ts','--')} · {_pmap_edit.get(e['player_id'],{}).get('name','?')} · {ALL_EVENTS.get(e['event_type'],{}).get('label',e['event_type'])}" for e in all_evs]
+                sel_idx_edit = st.selectbox("Evento a corregir", range(len(ev_labels)), format_func=lambda i: ev_labels[i], key="edit_ev_sel")
+                sel_ev = all_evs[sel_idx_edit]
+                _ev_pos = _pmap_edit.get(sel_ev["player_id"], {}).get("position", "MED")
+                ev_dict_edit = GK_EVENTS if _ev_pos=="GK" else FIELD_EVENTS
+                _cur_idx = list(ev_dict_edit.keys()).index(sel_ev["event_type"]) if sel_ev["event_type"] in ev_dict_edit else 0
+                new_ev_type = st.selectbox("Cambiarlo a", list(ev_dict_edit.keys()), index=_cur_idx, format_func=lambda k: ev_dict_edit[k]["label"], key="edit_ev_new")
+                if st.button("✓ Aplicar corrección", use_container_width=True, key="edit_ev_save", type="primary"):
+                    _upd("events", {"event_type": new_ev_type, "event_cat": ev_dict_edit[new_ev_type]["cat"]}, {"id": sel_ev["id"]})
+                    st.success(f"✓ Corregido: {ev_dict_edit[new_ev_type]['label']}")
+                    st.rerun()
 
         st.divider()
         st.markdown('<div class="stitle" style="color:#ef4444;">Cerrar sesión</div>', unsafe_allow_html=True)
@@ -1186,7 +1258,7 @@ def render_analisis_tecnico():
             if n_total == 0: st.error("Sin eventos registrados.")
             else:
                 close_and_compute(sess["id"], ex_key)
-                closed = normalise_session(q("SELECT * FROM sessions WHERE id=?", sess["id"], one=True))
+                closed = normalise_session(_one("sessions", {"id": sess["id"]}))
                 pls2 = session_players(sess["id"])
                 st.session_state.report_session = closed
                 st.session_state.report_player = pls2[0] if pls2 else None
@@ -1270,14 +1342,14 @@ def render_analisis_tecnico():
                 with c1:
                     ea = ev_dict[ev_a]
                     if st.button(ea["label"], key=f"ea_{ev_a}_{kb}", use_container_width=True, disabled=_blocked):
-                        insert("INSERT INTO events VALUES (?,?,?,?,?,?,?)", str(uuid.uuid4())[:16], sess["id"], ap["id"], ev_a, ea["cat"], match_ts, datetime.now().isoformat()); st.rerun()
+                        _ins("events", {"id": str(uuid.uuid4())[:16], "session_id": sess["id"], "player_id": ap["id"], "event_type": ev_a, "event_cat": ea["cat"], "ts": match_ts, "created_at": datetime.now().isoformat()})
                 with c2:
                     if ev_b:
                         eb = ev_dict[ev_b]
                         if st.button(eb["label"], key=f"eb_{ev_b}_{kb}", use_container_width=True, disabled=_blocked):
-                            insert("INSERT INTO events VALUES (?,?,?,?,?,?,?)", str(uuid.uuid4())[:16], sess["id"], ap["id"], ev_b, eb["cat"], match_ts, datetime.now().isoformat()); st.rerun()
+                            _ins("events", {"id": str(uuid.uuid4())[:16], "session_id": sess["id"], "player_id": ap["id"], "event_type": ev_b, "event_cat": eb["cat"], "ts": match_ts, "created_at": datetime.now().isoformat()})
 
-            evs_ap = q("SELECT * FROM events WHERE session_id=? AND player_id=?", sess["id"], ap["id"])
+            evs_ap = _q("events", {"session_id": sess["id"], "player_id": ap["id"]})
             if evs_ap:
                 st.divider()
                 cat_c = {}
@@ -1291,7 +1363,7 @@ def render_analisis_tecnico():
         ap = st.session_state.active_player
         st.markdown('<div class="stitle">Métricas en vivo</div>', unsafe_allow_html=True)
         if ap:
-            evs_ap = q("SELECT * FROM events WHERE session_id=? AND player_id=?", sess["id"], ap["id"])
+            evs_ap = _q("events", {"session_id": sess["id"], "player_id": ap["id"]})
             m = compute_metrics(evs_ap, ap["position"], ex_key)
             if m:
                 pc = pos_color(ap["position"])
@@ -1322,7 +1394,7 @@ def render_reportes():
                 '<div class="page-sub">Análisis de rendimiento por sesión y jugador</div></div>', unsafe_allow_html=True)
     st.markdown("<div style='padding:0 2rem;'>", unsafe_allow_html=True)
 
-    closed_sess = [normalise_session(s) for s in q("SELECT * FROM sessions WHERE status='closed' ORDER BY closed_at DESC")]
+    closed_sess = [normalise_session(s) for s in _q("sessions", {"status": "closed"}, order="closed_at", desc_order=True)]
     if not closed_sess:
         st.markdown('<div class="pip-card" style="margin-top:1rem;"><div class="empty-state"><div class="empty-icon">📋</div><div class="empty-title">Sin reportes disponibles</div><div class="empty-sub">Los reportes se generan al cerrar una sesión con eventos registrados</div></div></div>', unsafe_allow_html=True)
         st.markdown("</div>",unsafe_allow_html=True); return
@@ -1344,8 +1416,8 @@ def render_reportes():
     sel_pl = st.selectbox("Jugador", pl_names, index=cur_pl_idx, key="rep_pl_sel", label_visibility="collapsed")
     rp = next(p for p in pls if p["name"]==sel_pl); st.session_state.report_player = rp
 
-    ex_key = rsess.get("exercise_type") or "Partido"
-    m = q("SELECT * FROM player_metrics WHERE session_id=? AND player_id=?", rsess["id"], rp["id"], one=True)
+    ex_key = rses.get("exercise_type") or "Partido"
+    m = _one("player_metrics", {"session_id": rsess["id"], "player_id": rp["id"]})
     if not m:
         st.warning("Sin métricas calculadas para este jugador."); st.markdown("</div>",unsafe_allow_html=True); return
     m = dict(m); atxt = analysis_text(rp["name"], m, ex_key); pc = pos_color(rp["position"])
@@ -1354,7 +1426,7 @@ def render_reportes():
     st.markdown(f'<div class="pip-card-sm" style="margin-bottom:1rem;display:flex;justify-content:space-between;align-items:center;gap:1rem;flex-wrap:wrap;">'
                 f'<div><div style="font-weight:700;font-size:18px;color:#f3f4f6;">{rp["name"]}</div>'
                 f'<div style="margin-top:4px;">{pos_badge_html(rp["position"])}'
-                f'<span style="font-size:.78rem;color:#6b7280;margin-left:8px;">{rsess["name"]} · {fmt_dt(rsess.get("closed_at",""))[:10]}</span></div></div>'
+                f'<span style="font-size:.78rem;color:#6b7280;margin-left:8px;">{rsess["name"]} · {fmt_dt(rses.get("closed_at",""))[:10]}</span></div></div>'
                 f'<div style="text-align:right;"><div style="font-size:.6rem;color:#6b7280;letter-spacing:.1em;text-transform:uppercase;">Rating</div>'
                 f'<div style="font-family:\'DM Sans\',sans-serif;font-weight:900;font-size:3rem;color:{pc};line-height:1;">{m["rating"]}</div></div>'
                 f'</div>', unsafe_allow_html=True)
@@ -1392,14 +1464,14 @@ def render_reportes():
 
         st.divider()
         st.markdown('<div class="stitle">Observaciones del scout</div>', unsafe_allow_html=True)
-        obs_row = q("SELECT * FROM scout_observations WHERE session_id=? AND player_id=?", rsess["id"], rp["id"], one=True)
+        obs_row = _one("scout_observations", {"session_id": rsess["id"], "player_id": rp["id"]})
         obs_current = obs_row["observation"] if obs_row else ""
         obs_input = st.text_area("", value=obs_current, height=100, placeholder="Observaciones, contexto, áreas de trabajo...", label_visibility="collapsed", key=f"obs_{rsess['id']}_{rp['id']}")
         if st.button("Guardar observaciones", use_container_width=True, key="rep_save_obs"):
-            if obs_row:
-                q("UPDATE scout_observations SET observation=?, updated_at=? WHERE session_id=? AND player_id=?", obs_input, datetime.now().isoformat(), rsess["id"], rp["id"], write=True)
-            else:
-                insert("INSERT INTO scout_observations VALUES (?,?,?,?,?)", str(uuid.uuid4())[:12], rsess["id"], rp["id"], obs_input, datetime.now().isoformat())
+            if obs_row: _upd("scout_observations",{"observation":obs_input,"updated_at":datetime.now().isoformat()},{"session_id":rsess["id"],"player_id":rp["id"]})
+            else: _ins("scout_observations", {"id": str(uuid.uuid4())[:12], "session_id": rsess["id"], "player_id": rp["id"], "observation": obs_input, "updated_at": datetime.now().isoformat()})
+
+
             st.success("Guardado ✓")
 
     with rc2:
@@ -1414,7 +1486,7 @@ def render_reportes():
             medals = {1:"🥇",2:"🥈",3:"🥉"}
             ratings = []
             for p in pls:
-                pm = q("SELECT rating, position FROM player_metrics WHERE session_id=? AND player_id=?", rsess["id"], p["id"], one=True)
+                pm = _one("player_metrics", {"session_id": rsess["id"], "player_id": p["id"]})
                 if pm: ratings.append((p["name"],pm["rating"],pm["position"]))
             ratings.sort(key=lambda x:x[1], reverse=True)
             for i,(pname,prat,ppos) in enumerate(ratings,1):
@@ -1426,7 +1498,7 @@ def render_reportes():
                             f'<span style="font-weight:700;color:{ppc};font-size:1.05rem;">{prat}</span></div>', unsafe_allow_html=True)
 
         st.divider()
-        obs_saved = q("SELECT * FROM scout_observations WHERE session_id=? AND player_id=?", rsess["id"], rp["id"], one=True)
+        obs_saved = _one("scout_observations", {"session_id": rsess["id"], "player_id": rp["id"]})
         obs_text_dl = obs_saved["observation"] if obs_saved else ""
         try:
             html_bytes = make_report_html(rp["name"], rsess, m, atxt, obs_text_dl)
@@ -1445,43 +1517,43 @@ def render_comparaciones():
     st.markdown("<div style='padding:0 2rem;'>", unsafe_allow_html=True)
 
     # Obtenir totes les sessions tancades amb mètriques
-    closed_sess = [normalise_session(s) for s in q("SELECT * FROM sessions WHERE status='closed' ORDER BY closed_at DESC")]
-    all_players  = [normalise_player(p) for p in q("SELECT * FROM players ORDER BY name")]
+    closed_sess = [normalise_session(s) for s in _q("sessions", {"status": "closed"}, order="closed_at", desc_order=True)]
+    all_players  = [normalise_player(p) for p in _q("players", order="name")]
 
     if not closed_sess or not all_players:
         st.markdown('<div class="pip-card" style="margin-top:1rem;"><div class="empty-state">'
                     '<div class="empty-icon">⇄</div>'
                     '<div class="empty-title">Sin datos para comparar</div>'
-                    '<div class="empty-sub">Necessites almenys una sessió tancada amb esdeveniments registrats.</div>'
+                    '<div class="empty-sub">Necesitas al menos una sesión cerrada con eventos registrados.</div>'
                     '</div></div>', unsafe_allow_html=True)
         st.markdown("</div>", unsafe_allow_html=True); return
 
     # Selectors
     sel_col1, sel_col2 = st.columns(2)
     with sel_col1:
-        sess_options = ["Totes les sessions"] + [s["name"] for s in closed_sess]
-        sel_sess = st.selectbox("Sessió", sess_options, key="comp_sess")
+        sess_options = ["Todas las sesiones"] + [s["name"] for s in closed_sess]
+        sel_sess = st.selectbox("Sesión", sess_options, key="comp_sess")
     with sel_col2:
         player_names = [p["name"] for p in all_players]
-        sel_players  = st.multiselect("Jugadors a comparar (màx 4)", player_names, default=player_names[:min(2,len(player_names))], key="comp_players")
+        sel_players  = st.multiselect("Jugadores a comparar (máx 4)", player_names, default=player_names[:min(2,len(player_names))], key="comp_players")
 
     if not sel_players:
-        st.info("Selecciona almenys un jugador."); st.markdown("</div>",unsafe_allow_html=True); return
+        st.info("Selecciona al menos un jugador."); st.markdown("</div>",unsafe_allow_html=True); return
 
     # Recollir mètriques per cada jugador seleccionat
     comp_data = []
     for pname in sel_players[:4]:
         p = next((x for x in all_players if x["name"]==pname), None)
         if not p: continue
-        if sel_sess == "Totes les sessions":
-            # Promig de totes les sessions
-            metrics_rows = q("SELECT * FROM player_metrics WHERE player_id=? ORDER BY calculated_at DESC", p["id"])
+        if sel_sess == "Todas las sesiones": metrics_rows = _q("player_metrics", {"player_id": p["id"]}, order="calculated_at", desc_order=True)
         else:
             sess_obj = next((s for s in closed_sess if s["name"]==sel_sess), None)
-            if sess_obj:
-                metrics_rows = q("SELECT * FROM player_metrics WHERE player_id=? AND session_id=?", p["id"], sess_obj["id"])
-            else:
-                metrics_rows = []
+            metrics_rows = _q("player_metrics", {"player_id": p["id"], "session_id": sess_obj["id"]}) if sess_obj else []
+
+
+
+
+
         if not metrics_rows: continue
         # Calcular promig si hi ha múltiples sessions
         def avg_field(field):
@@ -1504,18 +1576,18 @@ def render_comparaciones():
         comp_data.append(m)
 
     if not comp_data:
-        st.warning("Cap dels jugadors seleccionats té mètriques en la sessió escollida.")
+        st.warning("Ninguno de los jugadores seleccionats té métricas en la sesión escollida.")
         st.markdown("</div>",unsafe_allow_html=True); return
 
     st.divider()
 
     # ── Taula resum de ratings ──
-    st.markdown('<div class="stitle">Resum de ratings</div>', unsafe_allow_html=True)
+    st.markdown('<div class="stitle">Resumen de ratings</div>', unsafe_allow_html=True)
     cols_header = st.columns(len(comp_data))
     for i, m in enumerate(comp_data):
         pc = pos_color(m["position"])
         with cols_header[i]:
-            sess_label = f'{m["n_sessions"]} sess.' if m["n_sessions"]>1 else "1 sess."
+            sess_label = f'{m["n_sessions"]} ses.' if m["n_sessions"]>1 else "1 ses."
             st.markdown(
                 f'<div class="pip-card-sm" style="text-align:center;border-color:{pc}44;">'
                 f'<div style="font-size:10px;color:#6b7280;letter-spacing:.1em;text-transform:uppercase;margin-bottom:4px;">{m["position"]} · {sess_label}</div>'
@@ -1527,7 +1599,7 @@ def render_comparaciones():
     st.divider()
 
     # ── Comparativa de categories ──
-    st.markdown('<div class="stitle">Categories</div>', unsafe_allow_html=True)
+    st.markdown('<div class="stitle">Categorías</div>', unsafe_allow_html=True)
     cat_keys = [("Técnica","score_technical","#3b82f6"),
                 ("Decisión","score_decision","#8b5cf6"),
                 ("Ataque","score_offensive","#ef4444"),
@@ -1551,7 +1623,7 @@ def render_comparaciones():
     st.divider()
 
     # ── Radars en columnes ──
-    st.markdown('<div class="stitle">Perfils de rendiment</div>', unsafe_allow_html=True)
+    st.markdown('<div class="stitle">Perfiles de rendimiento</div>', unsafe_allow_html=True)
     radar_cols = st.columns(len(comp_data))
     for i, m in enumerate(comp_data):
         with radar_cols[i]:
@@ -1565,7 +1637,7 @@ def render_comparaciones():
     metric_rows_def = [
         ("Rating",         "rating"),
         ("Participació %", "participation_rate"),
-        ("Total events",   "total_events"),
+        ("Todal events",   "total_events"),
         ("Pase %",         "pass_accuracy"),
         ("Gols",           "goals"),
         ("Recuperacions",  "recoveries"),
@@ -1604,7 +1676,7 @@ def render_calendario():
     m = st.session_state.cal_month
 
     # Carregar totes les sessions i indexar per data
-    all_sessions = [normalise_session(s) for s in q("SELECT * FROM sessions ORDER BY created_at")]
+    all_sessions = [normalise_session(s) for s in _q("sessions", order="created_at")]
     sessions_by_date = {}
     for s in all_sessions:
         try:
@@ -1722,7 +1794,7 @@ def render_calendario():
         st.divider()
         st.markdown('<div class="stitle">Sessions d\'aquest mes</div>', unsafe_allow_html=True)
         for d, s in month_sessions:
-            status_badge = '<span class="badge badge-yellow">Oberta</span>' if s["status"]=="open" else '<span class="badge badge-green">Tancada</span>'
+            status_badge = '<span class="badge badge-yellow">Abierta</span>' if s["status"]=="open" else '<span class="badge badge-green">Cerrada</span>'
             cat_col = "#7c3aed" if s["category"]=="Partido" else "#10b981"
             n_ev = ev_count(s["id"])
             sc1, sc2 = st.columns([4, 1])
@@ -1740,7 +1812,7 @@ def render_calendario():
                     f'</div></div>', unsafe_allow_html=True)
             with sc2:
                 if s["status"] == "open":
-                    if st.button("▶ Obrir", key=f"cal_open_{s['id']}", use_container_width=True):
+                    if st.button("▶ Abrir", key=f"cal_open_{s['id']}", use_container_width=True):
                         st.session_state.active_session = s
                         st.session_state.active_player  = None
                         go_nav("Análisis Técnico")
@@ -1797,94 +1869,65 @@ if st.session_state.screen == "splash":
 # ══════════════════════════════════════════════════════════════════════════════
 # ██ SCREEN: LOGIN
 # ══════════════════════════════════════════════════════════════════════════════
-elif st.session_state.screen == "login":
+elif st.session_state.screen=="login":
     st.markdown("""
     <style>
-    /* ── Login layout ── */
-    .login-page { padding-top: 7vh; }
-    .login-logo-block {
-        text-align: center;
-        margin-bottom: 2rem;
-    }
-    .login-logo-text {
-        font-family: 'Orbitron', monospace;
-        font-weight: 900;
-        font-size: 32px;
-        letter-spacing: .05em;
-        margin-bottom: .4rem;
-    }
-    .login-logo-text .pip { color: #e8e8f0; }
-    .login-logo-text .pro { color: #7c3aed; }
-    .login-box-top {
-        background: rgba(255,255,255,0.05);
-        border: 1px solid rgba(255,255,255,0.1);
-        border-bottom: 1px solid rgba(255,255,255,0.04);
-        border-radius: 14px 14px 0 0;
-        padding: 1.6rem 1.6rem 1.2rem;
-    }
-    .login-box-bottom {
-        background: rgba(255,255,255,0.03);
-        border: 1px solid rgba(255,255,255,0.1);
-        border-top: none;
-        border-radius: 0 0 14px 14px;
-        padding: 1rem 1.6rem 1.4rem;
-        margin-bottom: .8rem;
-    }
-    /* Força border violet en focus del password */
-    [data-baseweb="base-input"]:focus-within,
-    [data-testid="stTextInputRootElement"]:focus-within > div:first-child {
-        border-color: #7c3aed !important;
-        box-shadow: 0 0 0 2px rgba(124,58,237,0.2) !important;
-    }
+    .login-page { padding-top:7vh; }
+    .login-logo-block { text-align:center; margin-bottom:2rem; }
+    .login-logo-text { font-family:'Orbitron',monospace; font-weight:900; font-size:32px; letter-spacing:.05em; margin-bottom:.4rem; }
+    .login-logo-text .pip { color:#e8e8f0; }
+    .login-logo-text .pro { color:#7c3aed; }
     </style>
     """, unsafe_allow_html=True)
-
-    _, center, _ = st.columns([1, 1.05, 1])
+    _,center,_=st.columns([1,1.05,1])
     with center:
-        st.markdown('<div class="login-page">', unsafe_allow_html=True)
-
-        # Logo
-        st.markdown("""
-        <div class="login-logo-block">
-            <div class="login-logo-text">
-                <span class="pip">PIP</span><span class="pro">PRO</span>
-            </div>
-            <p style="color:#4b5563;font-size:10px;letter-spacing:.18em;text-transform:uppercase;margin:0;">
-                Performance Integral Platform
-            </p>
-        </div>
-        """, unsafe_allow_html=True)
-
-        # Capçalera del formulari
-        st.markdown("""
-        <div class="login-box-top">
-            <h2 style="font-size:19px;font-weight:700;margin:0 0 .25rem;color:#f3f4f6;">
-                Bienvenido de vuelta
-            </h2>
-            <p style="color:#6b7280;font-size:13px;margin:0;">
-                Inicia sesión para continuar
-            </p>
-        </div>
-        """, unsafe_allow_html=True)
-
-        # Inputs (Streamlit no permet embolcallar-los en un div)
-        usuario    = st.text_input("USUARIO", placeholder="Ingresa tu usuario", key="login_user")
-        contrasena = st.text_input("CONTRASEÑA", placeholder="Ingresa tu contraseña", type="password", key="login_pass")
-        if st.button("Iniciar sesión →", type="primary", use_container_width=True, key="login_btn"):
-            if usuario and contrasena:
-                st.session_state.logged_user = usuario.strip()
-                go_screen("app")
-            else:
-                st.error("Introduce usuario y contraseña.")
-
-        # Peu del formulari (tanca visualment la card)
-        st.markdown('<div class="login-box-bottom"></div>', unsafe_allow_html=True)
-
-        st.markdown(
-            '<p style="text-align:center;color:#1f2937;font-size:10px;letter-spacing:.05em;">'
-            '© 2024 PIP PRO · Todos los derechos reservados.</p>',
-            unsafe_allow_html=True)
-        st.markdown('</div>', unsafe_allow_html=True)
+        st.markdown('<div class="login-page">',unsafe_allow_html=True)
+        st.markdown('<div class="login-logo-block"><div class="login-logo-text"><span class="pip">PIP</span><span class="pro">PRO</span></div><p style="color:#4b5563;font-size:10px;letter-spacing:.18em;text-transform:uppercase;margin:0;">Performance Integral Platform</p></div>',unsafe_allow_html=True)
+        mode=st.session_state.get("login_mode","login")
+        t1,t2=st.columns(2)
+        with t1:
+            if st.button("Iniciar sesión",use_container_width=True,key="tab_login",
+                         type="primary" if mode=="login" else "secondary"):
+                st.session_state.login_mode="login"; st.rerun()
+        with t2:
+            if st.button("Crear cuenta",use_container_width=True,key="tab_reg",
+                         type="primary" if mode=="register" else "secondary"):
+                st.session_state.login_mode="register"; st.rerun()
+        st.markdown('<div style="background:rgba(255,255,255,0.04);border:1px solid rgba(255,255,255,0.1);border-radius:12px;padding:1.6rem 1.4rem 1rem;margin-top:0.5rem;">',unsafe_allow_html=True)
+        if mode=="login":
+            st.markdown('<h2 style="font-size:18px;font-weight:700;margin:0 0 .2rem;color:#f3f4f6;">Bienvenido de vuelta</h2><p style="color:#6b7280;font-size:13px;margin:0 0 1rem;">Inicia sesión para continuar</p>',unsafe_allow_html=True)
+        else:
+            st.markdown('<h2 style="font-size:18px;font-weight:700;margin:0 0 .2rem;color:#f3f4f6;">Crear cuenta</h2><p style="color:#6b7280;font-size:13px;margin:0 0 1rem;">Regístrate para acceder a PIP PRO</p>',unsafe_allow_html=True)
+        email=st.text_input("EMAIL",placeholder="tu@email.com",key="login_email")
+        password=st.text_input("CONTRASEÑA",placeholder="Contraseña",type="password",key="login_pass")
+        if mode=="login":
+            if st.button("Iniciar sesión →",type="primary",use_container_width=True,key="login_btn"):
+                if email and password:
+                    with st.spinner("Verificando..."):
+                        user,err=auth_login(email,password)
+                    if user:
+                        display=email.split("@")[0].replace("."," ").replace("_"," ").title()
+                        st.session_state.logged_user=display; st.session_state.supabase_user=user
+                        go_screen("app")
+                    else:
+                        st.error("Credenciales incorrectas.")
+                else:
+                    st.error("Introduce email y contraseña.")
+        else:
+            if st.button("Crear cuenta →",type="primary",use_container_width=True,key="reg_btn"):
+                if email and password:
+                    if len(password)<6: st.error("Mínimo 6 caracteres.")
+                    else:
+                        with st.spinner("Creando cuenta..."):
+                            user,err=auth_signup(email,password)
+                        if user:
+                            st.success("✓ ¡Cuenta creada! Revisa tu correo para confirmarla e inicia sesión.")
+                            st.session_state.login_mode="login"; st.rerun()
+                        else: st.error(f"Error: {err}")
+                else: st.error("Introduce email y contraseña.")
+        st.markdown('</div>',unsafe_allow_html=True)
+        st.markdown('<p style="text-align:center;color:#1f2937;font-size:10px;margin-top:.8rem;">© 2024 PIP PRO · Confidencial</p>',unsafe_allow_html=True)
+        st.markdown('</div>',unsafe_allow_html=True)
 
 # ══════════════════════════════════════════════════════════════════════════════
 # ██ SCREEN: APP
