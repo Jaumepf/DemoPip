@@ -1168,7 +1168,8 @@ def render_analisis_tecnico():
             _rol = st.radio("Rol", ["Titular","Suplente"], horizontal=True, key="at_rol")
             _entry_min = 0
             if _rol == "Suplente":
-                _entry_min = st.number_input("Minuto de entrada", min_value=0, max_value=120, value=46, step=1, key="at_entry_min")
+                _auto_min = st.session_state.get("current_match_min", 46)
+            _entry_min = st.number_input("Minuto de entrada", min_value=0, max_value=120, value=int(_auto_min), step=1, key="at_entry_min")
             if st.button("Añadir a sesión", use_container_width=True, key="at_addp"):
                 name = new_pname.strip()
                 if name:
@@ -1203,7 +1204,8 @@ def render_analisis_tecnico():
                 if _sp_fresh and _sp_fresh[0].get("exit_minute") is None:
                     with st.expander("🔄 Sustituir jugador activo"):
                         st.markdown(f'<div style="font-size:11px;color:#9ca3af;margin-bottom:6px;">Jugador: <strong>{ap_act["name"]}</strong></div>', unsafe_allow_html=True)
-                        _sub_min = st.number_input("Minuto de sustitución", min_value=1, max_value=120, value=46, step=1, key="sub_min_input")
+                        _auto_sub = st.session_state.get("current_match_min", 46)
+                        _sub_min = st.number_input("Minuto de sustitución", min_value=1, max_value=120, value=max(1,int(_auto_sub)), step=1, key="sub_min_input")
                         if st.button("Confirmar sustitución", use_container_width=True, key="sub_confirm", type="primary"):
                             _upd("session_players", {"exit_minute": int(_sub_min)}, {"session_id": sess["id"], "player_id": ap_act["id"]})
                             st.session_state.active_player = None; st.rerun()
@@ -1280,6 +1282,8 @@ def render_analisis_tecnico():
             _curr_min = 90; match_ts = "90'"
         else:
             _curr_min = 0; match_ts = "--'"
+        # Expose current match minute globally for other widgets
+        st.session_state["current_match_min"] = _curr_min
 
         if sess["category"] == "Partido":
             _phase_meta = {
